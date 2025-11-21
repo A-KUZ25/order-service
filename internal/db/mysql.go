@@ -19,10 +19,10 @@ func NewMySQL() (*sql.DB, error) {
 		return nil, fmt.Errorf("mysql open error: %w", err)
 	}
 
-	db.SetMaxOpenConns(50)                  // общее число открытых соединений
-	db.SetMaxIdleConns(25)                  // простаивающих соединений
-	db.SetConnMaxLifetime(time.Hour)        //сколько максимум живёт одно соединение, даже если активно
-	db.SetConnMaxIdleTime(30 * time.Minute) //сколько максимум бездействует соединение
+	db.SetMaxOpenConns(50)                 // общее число открытых соединений
+	db.SetMaxIdleConns(25)                 // простаивающих соединений
+	db.SetConnMaxLifetime(9 * time.Minute) //сколько максимум живёт одно соединение, даже если активно
+	db.SetConnMaxIdleTime(5 * time.Minute) //сколько максимум бездействует соединение
 
 	if err := db.Ping(); err != nil {
 		return nil, fmt.Errorf("mysql ping error: %w", err)

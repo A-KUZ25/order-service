@@ -4,7 +4,10 @@ import (
 	"log"
 	"net/http"
 	"orders-service/internal/db"
-	"orders-service/internal/rest/orders"
+	"orders-service/internal/repository/mysql"
+	"orders-service/internal/rest/orderhttp"
+	"orders-service/order"
+	"os"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/joho/godotenv"
@@ -18,16 +21,18 @@ func main() {
 		log.Fatalf("mysql init error: %v", err)
 	}
 
-	// DI: создаём handler (пока без service, заглушка)
-	handler := &orders.Handler{
-		// service: добавим позже
+	repo, err := mysql.NewOrdersRepository(mysqlDB)
+	if err != nil {
+		log.Fatalf("Repository init error: %v", err)
 	}
+	service := order.NewService(repo)
+	handler := orderhttp.NewHandler(service)
 
 	r := chi.NewRouter()
-	orders.RegisterRoutes(r, handler)
-
-	log.Println("server started at :8080")
-	http.ListenAndServe(":8080", r)
+	orderhttp.RegisterRoutes(r, handler)
+	port := os.Getenv("GO_PORT")
+	log.Printf("server started at :%s\n", port)
+	http.ListenAndServe(":"+port, r)
 
 	_ = mysqlDB
 }

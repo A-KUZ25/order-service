@@ -1,4 +1,4 @@
-package orders
+package orderhttp
 
 import "github.com/go-chi/chi/v5"
 
