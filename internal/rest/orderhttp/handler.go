@@ -42,8 +42,8 @@ func (h *Handler) GetUnpaidOrders(w http.ResponseWriter, r *http.Request) {
 		Status:                 req.Status,
 		Tariffs:                req.Tariffs,
 		UserPositions:          req.UserPositions,
-		SortField:              req.Sort,
-		SortOrder:              order.SortOrder(req.Order),
+		SortField:              req.Order,
+		SortOrder:              order.SortOrder(req.Sort),
 		StatusCompletedNotPaid: req.StatusCompletedNotPaid,
 	}
 

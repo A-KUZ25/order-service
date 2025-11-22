@@ -3,7 +3,6 @@ package mysql
 import (
 	"context"
 	"database/sql"
-	"log"
 	"strings"
 
 	"orders-service/order"
@@ -141,7 +140,6 @@ func (r *OrdersRepository) FetchUnpaidOrderIDs(
 
 	// 4) Выполняем второй SQL как обычный QueryContext
 	finalSQL := sb.String()
-	log.Printf("\nGO SQL:\n%s\nARGS: %+v\n", finalSQL, args)
 	rows2, err := r.db.QueryContext(ctx, finalSQL, args...)
 	if err != nil {
 		return nil, err
