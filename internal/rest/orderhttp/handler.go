@@ -51,8 +51,13 @@ func (h *Handler) GetUnpaidOrders(w http.ResponseWriter, r *http.Request) {
 
 	ids, err := h.service.GetUnpaidOrderIDs(ctx, filter)
 	if err != nil {
-		// Тут потом можно сделать нормальную ошибку/логгер
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+
+		json.NewEncoder(w).Encode(map[string]any{
+			"error":       "invalid_request_body",
+			"description": err.Error(),
+		})
 		return
 	}
 
