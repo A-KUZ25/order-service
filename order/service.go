@@ -4,51 +4,58 @@ import (
 	"context"
 )
 
-// SortOrder описывает направление сортировки.
 type SortOrder string
 
-const (
-	SortAsc  SortOrder = "asc"
-	SortDesc SortOrder = "desc"
-)
+type BaseFilter struct {
+	TenantID       int64
+	CityIDs        []int64
+	Status         []string
+	Date           *string
+	StatusTimeFrom *int64
+	StatusTimeTo   *int64
+	Tariffs        []int64
+	UserPositions  []int64
 
-// UnpaidOrdersFilter — то, что нужно сервису, чтобы найти неоплаченные заказы.
-type UnpaidOrdersFilter struct {
-	TenantID               int64
-	CityIDs                []int64 // может быть null
-	Date                   *string // пока строка, потом можем сделать time.Time
-	StatusTimeFrom         *int64  // unix timestamp (seconds)
-	StatusTimeTo           *int64
-	Status                 []string
-	Tariffs                []int64
-	UserPositions          []int64
-	SortField              string
-	SortOrder              SortOrder
+	SortField string
+	SortOrder string
+}
+
+type UnpaidFilter struct {
+	BaseFilter
+
 	StatusCompletedNotPaid int64
 }
 
-// Repository — интерфейс для работы с хранилищем заказов.
+type BadReviewFilter struct {
+	BaseFilter
+
+	BadRatingMax int64
+}
+
 type Repository interface {
-	FetchUnpaidOrderIDs(ctx context.Context, filter UnpaidOrdersFilter) ([]int64, error)
+	FetchUnpaidOrderIDs(ctx context.Context, filter UnpaidFilter) ([]int64, error)
+	FetchBadReviewOrderIDs(ctx context.Context, f BadReviewFilter) ([]int64, error)
 }
 
-// Service — интерфейс доменного сервиса заказов.
 type Service interface {
-	GetUnpaidOrderIDs(ctx context.Context, filter UnpaidOrdersFilter) ([]int64, error)
+	GetUnpaidOrderIDs(ctx context.Context, f UnpaidFilter) ([]int64, error)
+	GetBadReviewOrderIDs(ctx context.Context, f BadReviewFilter) ([]int64, error)
 }
 
-// service — конкретная реализация Service.
 type service struct {
 	repo Repository
 }
 
-// NewService — конструктор сервиса заказов.
 func NewService(repo Repository) Service {
 	return &service{
 		repo: repo,
 	}
 }
 
-func (s *service) GetUnpaidOrderIDs(ctx context.Context, filter UnpaidOrdersFilter) ([]int64, error) {
+func (s *service) GetUnpaidOrderIDs(ctx context.Context, filter UnpaidFilter) ([]int64, error) {
 	return s.repo.FetchUnpaidOrderIDs(ctx, filter)
+}
+
+func (s *service) GetBadReviewOrderIDs(ctx context.Context, f BadReviewFilter) ([]int64, error) {
+	return s.repo.FetchBadReviewOrderIDs(ctx, f)
 }

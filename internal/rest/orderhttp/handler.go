@@ -7,43 +7,36 @@ import (
 	"orders-service/order"
 )
 
-// Handler — HTTP-обёртка над доменным сервисом заказов.
 type Handler struct {
 	service order.Service
 }
 
-// NewHandler — конструктор хендлера.
 func NewHandler(service order.Service) *Handler {
 	return &Handler{
 		service: service,
 	}
 }
 
-// GetUnpaidOrders — HTTP-эндпоинт /orderhttp/unpaid.
 func (h *Handler) GetUnpaidOrders(w http.ResponseWriter, r *http.Request) {
-	var req UnpaidOrdersRequest
+	var req UnpaidRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-
-		json.NewEncoder(w).Encode(map[string]any{
-			"error":       "invalid_request_body",
-			"description": err.Error(),
-		})
+		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	filter := order.UnpaidOrdersFilter{
-		TenantID:               req.TenantID,
-		CityIDs:                req.CityIDs,
-		Date:                   req.Date,
-		StatusTimeFrom:         req.StatusTimeFrom,
-		StatusTimeTo:           req.StatusTimeTo,
-		Status:                 req.Status,
-		Tariffs:                req.Tariffs,
-		UserPositions:          req.UserPositions,
-		SortField:              req.Order,
-		SortOrder:              order.SortOrder(req.Sort),
+	filter := order.UnpaidFilter{
+		BaseFilter: order.BaseFilter{
+			TenantID:       req.TenantID,
+			CityIDs:        req.CityIDs,
+			Date:           req.Date,
+			StatusTimeFrom: req.StatusTimeFrom,
+			StatusTimeTo:   req.StatusTimeTo,
+			Status:         req.Status,
+			Tariffs:        req.Tariffs,
+			UserPositions:  req.UserPositions,
+			SortField:      req.SortField,
+			SortOrder:      req.SortOrder,
+		},
 		StatusCompletedNotPaid: req.StatusCompletedNotPaid,
 	}
 
@@ -51,20 +44,49 @@ func (h *Handler) GetUnpaidOrders(w http.ResponseWriter, r *http.Request) {
 
 	ids, err := h.service.GetUnpaidOrderIDs(ctx, filter)
 	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-
-		json.NewEncoder(w).Encode(map[string]any{
-			"error":       "invalid_request_body",
-			"description": err.Error(),
-		})
+		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 
-	resp := UnpaidOrdersResponse{
-		UnpaidOrderIDs: ids,
+	writeJSON(w, http.StatusOK, UnpaidResponse{
+		UnpaidIDs: ids,
+	})
+
+}
+
+func (h *Handler) GetBadReviewOrders(w http.ResponseWriter, r *http.Request) {
+	var req BadReviewRequest
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	filter := order.BadReviewFilter{
+		BaseFilter: order.BaseFilter{
+			TenantID:       req.TenantID,
+			CityIDs:        req.CityIDs,
+			Date:           req.Date,
+			StatusTimeFrom: req.StatusTimeFrom,
+			StatusTimeTo:   req.StatusTimeTo,
+			Status:         req.Status,
+			Tariffs:        req.Tariffs,
+			UserPositions:  req.UserPositions,
+			SortField:      req.SortField,
+			SortOrder:      req.SortOrder,
+		},
+		BadRatingMax: req.BadRatingMax,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(resp)
+	ctx := r.Context()
+
+	ids, err := h.service.GetBadReviewOrderIDs(ctx, filter)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, BadReviewResponse{
+		BadReviewIDs: ids,
+	})
+
 }

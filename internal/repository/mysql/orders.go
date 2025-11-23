@@ -8,153 +8,168 @@ import (
 	"orders-service/order"
 )
 
-// OrdersRepository — реализация доменного интерфейса orderhttp.Repository для MySQL.
 type OrdersRepository struct {
 	db *sql.DB
-
-	stmtUnpaidBase *sql.Stmt
 }
 
-// NewOrdersRepository — конструктор репозитория заказов.
 func NewOrdersRepository(db *sql.DB) (*OrdersRepository, error) {
-	stmt, err := db.Prepare(QueryUnpaidOrdersBase)
-	if err != nil {
-		return nil, err
-	}
-
-	return &OrdersRepository{
-		db:             db,
-		stmtUnpaidBase: stmt,
-	}, nil
+	return &OrdersRepository{db: db}, nil
 }
 
-// Compile-time проверка: OrdersRepository реализует orderhttp.Repository.
-var _ order.Repository = (*OrdersRepository)(nil)
+// -----------------------------------------------------------
+//  COMMON SQL BUILDERS
+// -----------------------------------------------------------
 
-func (r *OrdersRepository) FetchUnpaidOrderIDs(
-	ctx context.Context,
-	filter order.UnpaidOrdersFilter,
-) ([]int64, error) {
+// строит общую часть WHERE (tenant, active, date-range, city, tariffs…)
+func (r *OrdersRepository) buildBaseQuery(sb *strings.Builder, args *[]any, f order.BaseFilter) {
+	sb.WriteString(`
+WHERE o.tenant_id = ?
+  AND o.active = 1
+`)
+	*args = append(*args, f.TenantID)
 
-	// 1) Выполняем базовый подготовленный запрос
-	rows, err := r.stmtUnpaidBase.QueryContext(ctx,
-		filter.TenantID,
-		filter.StatusCompletedNotPaid,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	// 2) Собираем ID, прошедшие базовые условия
-	baseIDs := make([]int64, 0)
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		baseIDs = append(baseIDs, id)
+	// date
+	if f.StatusTimeFrom != nil && f.StatusTimeTo != nil {
+		sb.WriteString("  AND o.status_time BETWEEN ? AND ?\n")
+		*args = append(*args, *f.StatusTimeFrom, *f.StatusTimeTo)
 	}
 
-	// Если нет базовых ID → нечего фильтровать далее
-	if len(baseIDs) == 0 {
-		return []int64{}, nil
-	}
-
-	// 3) Строим динамический SQL для дополнительной фильтрации
-	var (
-		sb   strings.Builder
-		args []any
-	)
-
-	sb.WriteString(
-		"SELECT o.order_id\n" +
-			"FROM tbl_order o\n" +
-			"WHERE o.order_id IN (",
-	)
-	for i, id := range baseIDs {
-		if i > 0 {
-			sb.WriteString(",")
-		}
-		sb.WriteString("?")
-		args = append(args, id)
-	}
-	sb.WriteString(")\n")
-
-	// фильтр по city_id (список городов)
-	if len(filter.CityIDs) > 0 {
+	// city
+	if len(f.CityIDs) > 0 {
 		sb.WriteString("  AND o.city_id IN (")
-		placeholders := make([]string, 0, len(filter.CityIDs))
-
-		for _, id := range filter.CityIDs {
-			placeholders = append(placeholders, "?")
-			args = append(args, id)
-		}
-
-		sb.WriteString(strings.Join(placeholders, ","))
-		sb.WriteString(")\n")
-	}
-
-	// status_time BETWEEN
-	if filter.StatusTimeFrom != nil && filter.StatusTimeTo != nil {
-		sb.WriteString("AND o.status_time BETWEEN ? AND ?\n")
-		args = append(args, *filter.StatusTimeFrom, *filter.StatusTimeTo)
-	}
-
-	// tariffs
-	if len(filter.Tariffs) > 0 {
-		sb.WriteString("AND o.tariff_id IN (")
-		for i, t := range filter.Tariffs {
+		for i, id := range f.CityIDs {
 			if i > 0 {
 				sb.WriteString(",")
 			}
 			sb.WriteString("?")
-			args = append(args, t)
+			*args = append(*args, id)
+		}
+		sb.WriteString(")\n")
+	}
+
+	// tariffs
+	if len(f.Tariffs) > 0 {
+		sb.WriteString("  AND o.tariff_id IN (")
+		for i, t := range f.Tariffs {
+			if i > 0 {
+				sb.WriteString(",")
+			}
+			sb.WriteString("?")
+			*args = append(*args, t)
 		}
 		sb.WriteString(")\n")
 	}
 
 	// positions
-	if len(filter.UserPositions) > 0 {
-		sb.WriteString("AND o.position_id IN (")
-		for i, p := range filter.UserPositions {
+	if len(f.UserPositions) > 0 {
+		sb.WriteString("  AND o.position_id IN (")
+		for i, p := range f.UserPositions {
 			if i > 0 {
 				sb.WriteString(",")
 			}
 			sb.WriteString("?")
-			args = append(args, p)
+			*args = append(*args, p)
 		}
 		sb.WriteString(")\n")
 	}
+}
 
-	// sort
-	orderField := filter.SortField
+// добавляем ORDER BY
+func (r *OrdersRepository) appendOrderBy(sb *strings.Builder, f order.BaseFilter) {
+	orderField := f.SortField
 	if orderField == "" {
 		orderField = "o.status_time"
 	}
+
 	orderDir := "DESC"
-	if strings.ToLower(string(filter.SortOrder)) == "asc" {
+	if strings.ToLower(string(f.SortOrder)) == "asc" {
 		orderDir = "ASC"
 	}
-	sb.WriteString("ORDER BY " + orderField + " " + orderDir + "\n")
 
-	// 4) Выполняем второй SQL как обычный QueryContext
-	finalSQL := sb.String()
-	rows2, err := r.db.QueryContext(ctx, finalSQL, args...)
+	sb.WriteString("ORDER BY " + orderField + " " + orderDir + "\n")
+}
+
+// выполняет SQL и возвращает IDs
+func (r *OrdersRepository) executeQuery(
+	ctx context.Context,
+	sql string,
+	args []any,
+) ([]int64, error) {
+
+	rows, err := r.db.QueryContext(ctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}
-	defer rows2.Close()
+	defer rows.Close()
 
-	result := []int64{}
-	for rows2.Next() {
+	var ids []int64
+	for rows.Next() {
 		var id int64
-		if err := rows2.Scan(&id); err != nil {
+		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
-		result = append(result, id)
+		ids = append(ids, id)
 	}
+	return ids, rows.Err()
+}
 
-	return result, rows2.Err()
+// -----------------------------------------------------------
+//  UNPAID
+// -----------------------------------------------------------
 
+func (r *OrdersRepository) FetchUnpaidOrderIDs(
+	ctx context.Context,
+	f order.UnpaidFilter,
+) ([]int64, error) {
+
+	var sb strings.Builder
+	args := []any{}
+
+	sb.WriteString(`
+SELECT o.order_id
+FROM tbl_order o
+`)
+
+	// Общая часть
+	r.buildBaseQuery(&sb, &args, f.BaseFilter)
+
+	// Специфичная часть unpaid
+	sb.WriteString("  AND o.status_id = ?\n")
+	args = append(args, f.StatusCompletedNotPaid)
+
+	// OrderBy
+	r.appendOrderBy(&sb, f.BaseFilter)
+
+	// Final
+	return r.executeQuery(ctx, sb.String(), args)
+}
+
+// -----------------------------------------------------------
+//  BAD REVIEWS
+// -----------------------------------------------------------
+
+func (r *OrdersRepository) FetchBadReviewOrderIDs(
+	ctx context.Context,
+	f order.BadReviewFilter,
+) ([]int64, error) {
+
+	var sb strings.Builder
+	args := []any{}
+
+	sb.WriteString(`
+SELECT o.order_id
+FROM tbl_order o
+LEFT JOIN tbl_client_review cr ON o.order_id = cr.order_id
+`)
+
+	// Общая часть
+	r.buildBaseQuery(&sb, &args, f.BaseFilter)
+
+	// специфично bad reviews
+	sb.WriteString("  AND cr.rating BETWEEN 1 AND ?\n")
+	args = append(args, f.BadRatingMax)
+
+	r.appendOrderBy(&sb, f.BaseFilter)
+
+	return r.executeQuery(ctx, sb.String(), args)
 }
