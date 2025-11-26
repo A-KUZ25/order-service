@@ -16,10 +16,6 @@ func NewOrdersRepository(db *sql.DB) (*OrdersRepository, error) {
 	return &OrdersRepository{db: db}, nil
 }
 
-// -----------------------------------------------------------
-//  COMMON SQL BUILDERS
-// -----------------------------------------------------------
-
 // строит общую часть WHERE (tenant, active, date-range, city, tariffs…)
 func (r *OrdersRepository) buildBaseQuery(sb *strings.Builder, args *[]any, f order.BaseFilter) {
 	sb.WriteString(`
@@ -113,10 +109,6 @@ func (r *OrdersRepository) executeQuery(
 	return ids, rows.Err()
 }
 
-// -----------------------------------------------------------
-//  UNPAID
-// -----------------------------------------------------------
-
 func (r *OrdersRepository) FetchUnpaidOrderIDs(
 	ctx context.Context,
 	f order.UnpaidFilter,
@@ -143,10 +135,6 @@ FROM tbl_order o
 	// Final
 	return r.executeQuery(ctx, sb.String(), args)
 }
-
-// -----------------------------------------------------------
-//  BAD REVIEWS
-// -----------------------------------------------------------
 
 func (r *OrdersRepository) FetchBadReviewOrderIDs(
 	ctx context.Context,
