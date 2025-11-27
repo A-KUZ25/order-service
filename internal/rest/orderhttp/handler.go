@@ -90,3 +90,39 @@ func (h *Handler) GetBadReviewOrders(w http.ResponseWriter, r *http.Request) {
 	})
 
 }
+
+func (h *Handler) GetRealPriceMorePredvPrice(w http.ResponseWriter, r *http.Request) {
+	var req RealPriceRequest
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	filter := order.RealPriceFilter{
+		BaseFilter: order.BaseFilter{
+			TenantID:       req.TenantID,
+			CityIDs:        req.CityIDs,
+			Date:           req.Date,
+			StatusTimeFrom: req.StatusTimeFrom,
+			StatusTimeTo:   req.StatusTimeTo,
+			Status:         req.Status,
+			Tariffs:        req.Tariffs,
+			UserPositions:  req.UserPositions,
+			SortField:      req.SortField,
+			SortOrder:      req.SortOrder,
+		},
+		MinRealPrice:   req.MinRealPrice,
+		FinishedStatus: req.FinishedStatus,
+	}
+
+	ids, err := h.service.GetRealPriceMorePredvPrice(r.Context(), filter)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, RealPriceResponse{
+		PriceIDs: ids,
+	})
+}

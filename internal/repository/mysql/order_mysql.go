@@ -161,3 +161,42 @@ LEFT JOIN tbl_client_review cr ON o.order_id = cr.order_id
 
 	return r.executeQuery(ctx, sb.String(), args)
 }
+
+func (r *OrdersRepository) FetchRealPriceMorePredvPrice(
+	ctx context.Context,
+	f order.RealPriceFilter,
+) ([]int64, error) {
+
+	var sb strings.Builder
+	var args []any
+
+	sb.WriteString(`
+SELECT o.order_id
+FROM tbl_order o
+`)
+
+	r.buildBaseQuery(&sb, &args, f.BaseFilter)
+
+	// Специфика realPriceMorePredvPrice
+	// 1) статус не должен быть финальным
+	if len(f.FinishedStatus) > 0 {
+		sb.WriteString("  AND o.status_id NOT IN (")
+		for i, st := range f.FinishedStatus {
+			if i > 0 {
+				sb.WriteString(",")
+			}
+			sb.WriteString("?")
+			args = append(args, st)
+		}
+		sb.WriteString(")\n")
+	}
+
+	// 2) realtime_price > MinRealPrice
+	sb.WriteString("  AND o.realtime_price > ?\n")
+	args = append(args, f.MinRealPrice)
+
+	// ORDER BY
+	r.appendOrderBy(&sb, f.BaseFilter)
+
+	return r.executeQuery(ctx, sb.String(), args)
+}

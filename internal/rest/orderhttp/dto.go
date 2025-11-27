@@ -23,10 +23,19 @@ type BadReviewRequest struct {
 	BadRatingMax int64 `json:"bad_rating_max"`
 }
 
+type RealPriceRequest struct {
+	OrderBaseRequest
+	MinRealPrice   int64   `json:"min_real_price"`
+	FinishedStatus []int64 `json:"finished_status"`
+}
 type UnpaidResponse struct {
 	UnpaidIDs []int64 `json:"unpaid_order_ids"`
 }
 
 type BadReviewResponse struct {
 	BadReviewIDs []int64 `json:"bad_review_ids"`
+}
+
+type RealPriceResponse struct {
+	PriceIDs []int64 `json:"price_ids"`
 }

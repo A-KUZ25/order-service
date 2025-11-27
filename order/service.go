@@ -32,14 +32,23 @@ type BadReviewFilter struct {
 	BadRatingMax int64
 }
 
+type RealPriceFilter struct {
+	BaseFilter BaseFilter
+
+	MinRealPrice   int64
+	FinishedStatus []int64
+}
+
 type Repository interface {
 	FetchUnpaidOrderIDs(ctx context.Context, filter UnpaidFilter) ([]int64, error)
 	FetchBadReviewOrderIDs(ctx context.Context, f BadReviewFilter) ([]int64, error)
+	FetchRealPriceMorePredvPrice(ctx context.Context, f RealPriceFilter) ([]int64, error)
 }
 
 type Service interface {
 	GetUnpaidOrderIDs(ctx context.Context, f UnpaidFilter) ([]int64, error)
 	GetBadReviewOrderIDs(ctx context.Context, f BadReviewFilter) ([]int64, error)
+	GetRealPriceMorePredvPrice(ctx context.Context, f RealPriceFilter) ([]int64, error)
 }
 
 type service struct {
@@ -56,6 +65,13 @@ func (s *service) GetUnpaidOrderIDs(ctx context.Context, filter UnpaidFilter) ([
 	return s.repo.FetchUnpaidOrderIDs(ctx, filter)
 }
 
-func (s *service) GetBadReviewOrderIDs(ctx context.Context, f BadReviewFilter) ([]int64, error) {
-	return s.repo.FetchBadReviewOrderIDs(ctx, f)
+func (s *service) GetBadReviewOrderIDs(ctx context.Context, filter BadReviewFilter) ([]int64, error) {
+	return s.repo.FetchBadReviewOrderIDs(ctx, filter)
+}
+
+func (s *service) GetRealPriceMorePredvPrice(
+	ctx context.Context,
+	filter RealPriceFilter,
+) ([]int64, error) {
+	return s.repo.FetchRealPriceMorePredvPrice(ctx, filter)
 }
