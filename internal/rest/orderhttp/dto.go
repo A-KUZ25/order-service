@@ -25,7 +25,7 @@ type BadReviewRequest struct {
 
 type RealPriceRequest struct {
 	OrderBaseRequest
-	MinRealPrice   int64   `json:"min_real_price"`
+	MinRealPrice   float64 `json:"min_real_price"`
 	FinishedStatus []int64 `json:"finished_status"`
 }
 type UnpaidResponse struct {

@@ -35,7 +35,7 @@ type BadReviewFilter struct {
 type RealPriceFilter struct {
 	BaseFilter BaseFilter
 
-	MinRealPrice   int64
+	MinRealPrice   float64
 	FinishedStatus []int64
 }
 
