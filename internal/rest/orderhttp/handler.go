@@ -17,7 +17,7 @@ func NewHandler(service order.Service) *Handler {
 	}
 }
 
-func (h *Handler) GetUnpaidOrders(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) Unpaid(w http.ResponseWriter, r *http.Request) {
 	var req UnpaidRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -42,7 +42,7 @@ func (h *Handler) GetUnpaidOrders(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	ids, err := h.service.GetUnpaidOrderIDs(ctx, filter)
+	ids, err := h.service.GetUnpaid(ctx, filter)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -54,7 +54,7 @@ func (h *Handler) GetUnpaidOrders(w http.ResponseWriter, r *http.Request) {
 
 }
 
-func (h *Handler) GetBadReviewOrders(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) BadReview(w http.ResponseWriter, r *http.Request) {
 	var req BadReviewRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -79,7 +79,7 @@ func (h *Handler) GetBadReviewOrders(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	ids, err := h.service.GetBadReviewOrderIDs(ctx, filter)
+	ids, err := h.service.GetBadReview(ctx, filter)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -91,15 +91,15 @@ func (h *Handler) GetBadReviewOrders(w http.ResponseWriter, r *http.Request) {
 
 }
 
-func (h *Handler) GetRealPriceMorePredvPrice(w http.ResponseWriter, r *http.Request) {
-	var req RealPriceRequest
+func (h *Handler) ExceededPrice(w http.ResponseWriter, r *http.Request) {
+	var req ExceededPriceRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 
-	filter := order.RealPriceFilter{
+	filter := order.ExceededPriceFilter{
 		BaseFilter: order.BaseFilter{
 			TenantID:       req.TenantID,
 			CityIDs:        req.CityIDs,
@@ -116,13 +116,13 @@ func (h *Handler) GetRealPriceMorePredvPrice(w http.ResponseWriter, r *http.Requ
 		FinishedStatus: req.FinishedStatus,
 	}
 
-	ids, err := h.service.GetRealPriceMorePredvPrice(r.Context(), filter)
+	ids, err := h.service.GetExceededPrice(r.Context(), filter)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, RealPriceResponse{
+	writeJSON(w, http.StatusOK, ExceededPriceResponse{
 		PriceIDs: ids,
 	})
 }

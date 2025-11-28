@@ -70,7 +70,6 @@ WHERE o.tenant_id = ?
 	}
 }
 
-// добавляем ORDER BY
 func (r *OrdersRepository) appendOrderBy(sb *strings.Builder, f order.BaseFilter) {
 	orderField := f.SortField
 	if orderField == "" {
@@ -85,7 +84,6 @@ func (r *OrdersRepository) appendOrderBy(sb *strings.Builder, f order.BaseFilter
 	sb.WriteString("ORDER BY " + orderField + " " + orderDir + "\n")
 }
 
-// выполняет SQL и возвращает IDs
 func (r *OrdersRepository) executeQuery(
 	ctx context.Context,
 	sql string,
@@ -109,7 +107,7 @@ func (r *OrdersRepository) executeQuery(
 	return ids, rows.Err()
 }
 
-func (r *OrdersRepository) FetchUnpaidOrderIDs(
+func (r *OrdersRepository) FetchUnpaid(
 	ctx context.Context,
 	f order.UnpaidFilter,
 ) ([]int64, error) {
@@ -122,21 +120,18 @@ SELECT o.order_id
 FROM tbl_order o
 `)
 
-	// Общая часть
 	r.buildBaseQuery(&sb, &args, f.BaseFilter)
 
 	// Специфичная часть unpaid
 	sb.WriteString("  AND o.status_id = ?\n")
 	args = append(args, f.StatusCompletedNotPaid)
 
-	// OrderBy
 	r.appendOrderBy(&sb, f.BaseFilter)
 
-	// Final
 	return r.executeQuery(ctx, sb.String(), args)
 }
 
-func (r *OrdersRepository) FetchBadReviewOrderIDs(
+func (r *OrdersRepository) FetchBadReview(
 	ctx context.Context,
 	f order.BadReviewFilter,
 ) ([]int64, error) {
@@ -150,7 +145,6 @@ FROM tbl_order o
 LEFT JOIN tbl_client_review cr ON o.order_id = cr.order_id
 `)
 
-	// Общая часть
 	r.buildBaseQuery(&sb, &args, f.BaseFilter)
 
 	// специфично bad reviews
@@ -162,9 +156,9 @@ LEFT JOIN tbl_client_review cr ON o.order_id = cr.order_id
 	return r.executeQuery(ctx, sb.String(), args)
 }
 
-func (r *OrdersRepository) FetchRealPriceMorePredvPrice(
+func (r *OrdersRepository) FetchExceededPrice(
 	ctx context.Context,
-	f order.RealPriceFilter,
+	f order.ExceededPriceFilter,
 ) ([]int64, error) {
 
 	var sb strings.Builder
@@ -177,8 +171,7 @@ FROM tbl_order o
 
 	r.buildBaseQuery(&sb, &args, f.BaseFilter)
 
-	// Специфика realPriceMorePredvPrice
-	// 1) статус не должен быть финальным
+	//статус не должен быть финальным
 	if len(f.FinishedStatus) > 0 {
 		sb.WriteString("  AND o.status_id NOT IN (")
 		for i, st := range f.FinishedStatus {
@@ -191,11 +184,10 @@ FROM tbl_order o
 		sb.WriteString(")\n")
 	}
 
-	// 2) realtime_price > MinRealPrice
+	//realtime_price > MinRealPrice
 	sb.WriteString("  AND o.realtime_price > ?\n")
 	args = append(args, f.MinRealPrice)
 
-	// ORDER BY
 	r.appendOrderBy(&sb, f.BaseFilter)
 
 	return r.executeQuery(ctx, sb.String(), args)

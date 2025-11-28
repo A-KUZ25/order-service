@@ -32,7 +32,7 @@ type BadReviewFilter struct {
 	BadRatingMax int64
 }
 
-type RealPriceFilter struct {
+type ExceededPriceFilter struct {
 	BaseFilter BaseFilter
 
 	MinRealPrice   float64
@@ -40,15 +40,15 @@ type RealPriceFilter struct {
 }
 
 type Repository interface {
-	FetchUnpaidOrderIDs(ctx context.Context, filter UnpaidFilter) ([]int64, error)
-	FetchBadReviewOrderIDs(ctx context.Context, f BadReviewFilter) ([]int64, error)
-	FetchRealPriceMorePredvPrice(ctx context.Context, f RealPriceFilter) ([]int64, error)
+	FetchUnpaid(ctx context.Context, filter UnpaidFilter) ([]int64, error)
+	FetchBadReview(ctx context.Context, f BadReviewFilter) ([]int64, error)
+	FetchExceededPrice(ctx context.Context, f ExceededPriceFilter) ([]int64, error)
 }
 
 type Service interface {
-	GetUnpaidOrderIDs(ctx context.Context, f UnpaidFilter) ([]int64, error)
-	GetBadReviewOrderIDs(ctx context.Context, f BadReviewFilter) ([]int64, error)
-	GetRealPriceMorePredvPrice(ctx context.Context, f RealPriceFilter) ([]int64, error)
+	GetUnpaid(ctx context.Context, f UnpaidFilter) ([]int64, error)
+	GetBadReview(ctx context.Context, f BadReviewFilter) ([]int64, error)
+	GetExceededPrice(ctx context.Context, f ExceededPriceFilter) ([]int64, error)
 }
 
 type service struct {
@@ -61,17 +61,19 @@ func NewService(repo Repository) Service {
 	}
 }
 
-func (s *service) GetUnpaidOrderIDs(ctx context.Context, filter UnpaidFilter) ([]int64, error) {
-	return s.repo.FetchUnpaidOrderIDs(ctx, filter)
+func (s *service) GetUnpaid(ctx context.Context, filter UnpaidFilter) ([]int64, error) {
+	return s.repo.FetchUnpaid(ctx, filter)
 }
 
-func (s *service) GetBadReviewOrderIDs(ctx context.Context, filter BadReviewFilter) ([]int64, error) {
-	return s.repo.FetchBadReviewOrderIDs(ctx, filter)
-}
-
-func (s *service) GetRealPriceMorePredvPrice(
-	ctx context.Context,
-	filter RealPriceFilter,
+func (s *service) GetBadReview(
+	ctx context.Context, filter BadReviewFilter,
 ) ([]int64, error) {
-	return s.repo.FetchRealPriceMorePredvPrice(ctx, filter)
+	return s.repo.FetchBadReview(ctx, filter)
+}
+
+func (s *service) GetExceededPrice(
+	ctx context.Context,
+	filter ExceededPriceFilter,
+) ([]int64, error) {
+	return s.repo.FetchExceededPrice(ctx, filter)
 }
