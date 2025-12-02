@@ -3,9 +3,8 @@ package mysql
 import (
 	"context"
 	"database/sql"
-	"strings"
-
 	"orders-service/order"
+	"strings"
 )
 
 type OrdersRepository struct {
@@ -187,6 +186,38 @@ FROM tbl_order o
 	//realtime_price > MinRealPrice
 	sb.WriteString("  AND o.realtime_price > ?\n")
 	args = append(args, f.MinRealPrice)
+
+	r.appendOrderBy(&sb, f.BaseFilter)
+
+	return r.executeQuery(ctx, sb.String(), args)
+}
+
+func (r *OrdersRepository) FetchWarningStatus(
+	ctx context.Context,
+	f order.WarningFilter,
+) ([]int64, error) {
+
+	var sb strings.Builder
+	args := []any{}
+
+	sb.WriteString(`
+SELECT o.order_id
+FROM tbl_order o
+`)
+
+	r.buildBaseQuery(&sb, &args, f.BaseFilter)
+
+	if len(f.WarningStatus) > 0 {
+		sb.WriteString("  AND o.status_id IN (")
+		for i, st := range f.WarningStatus {
+			if i > 0 {
+				sb.WriteString(",")
+			}
+			sb.WriteString("?")
+			args = append(args, st)
+		}
+		sb.WriteString(")\n")
+	}
 
 	r.appendOrderBy(&sb, f.BaseFilter)
 

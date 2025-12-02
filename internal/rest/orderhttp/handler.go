@@ -126,3 +126,44 @@ func (h *Handler) ExceededPrice(w http.ResponseWriter, r *http.Request) {
 		PriceIDs: ids,
 	})
 }
+
+func (h *Handler) GetWarningOrders(w http.ResponseWriter, r *http.Request) {
+	var req WarningRequest
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	base := order.BaseFilter{
+		TenantID:       req.TenantID,
+		CityIDs:        req.CityIDs,
+		Date:           req.Date,
+		StatusTimeFrom: req.StatusTimeFrom,
+		StatusTimeTo:   req.StatusTimeTo,
+		Status:         nil, // для warning используем WarningStatuses, а не BaseFilter.Status
+		Tariffs:        req.Tariffs,
+		UserPositions:  req.UserPositions,
+		SortField:      req.SortField,
+		SortOrder:      req.SortOrder,
+	}
+
+	filter := order.WarningFilter{
+		BaseFilter:             base,
+		WarningStatus:          req.WarningStatus,
+		FinishedStatus:         req.FinishedStatus,
+		BadRatingMax:           req.BadRatingMax,
+		StatusCompletedNotPaid: req.StatusCompletedNotPaid,
+		MinRealPrice:           req.MinRealPrice,
+	}
+
+	ids, err := h.service.GetWarningOrder(r.Context(), filter)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, WarningResponse{
+		WarningOrderIDs: ids,
+	})
+}

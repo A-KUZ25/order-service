@@ -2,6 +2,7 @@ package order
 
 import (
 	"context"
+	"sort"
 )
 
 type SortOrder string
@@ -39,16 +40,27 @@ type ExceededPriceFilter struct {
 	FinishedStatus []int64
 }
 
+type WarningFilter struct {
+	BaseFilter             BaseFilter
+	WarningStatus          []int64
+	FinishedStatus         []int64
+	BadRatingMax           int64
+	StatusCompletedNotPaid int64
+	MinRealPrice           float64
+}
+
 type Repository interface {
 	FetchUnpaid(ctx context.Context, filter UnpaidFilter) ([]int64, error)
 	FetchBadReview(ctx context.Context, f BadReviewFilter) ([]int64, error)
 	FetchExceededPrice(ctx context.Context, f ExceededPriceFilter) ([]int64, error)
+	FetchWarningStatus(ctx context.Context, f WarningFilter) ([]int64, error)
 }
 
 type Service interface {
 	GetUnpaid(ctx context.Context, f UnpaidFilter) ([]int64, error)
 	GetBadReview(ctx context.Context, f BadReviewFilter) ([]int64, error)
 	GetExceededPrice(ctx context.Context, f ExceededPriceFilter) ([]int64, error)
+	GetWarningOrder(ctx context.Context, f WarningFilter) ([]int64, error)
 }
 
 type service struct {
@@ -76,4 +88,64 @@ func (s *service) GetExceededPrice(
 	filter ExceededPriceFilter,
 ) ([]int64, error) {
 	return s.repo.FetchExceededPrice(ctx, filter)
+}
+
+func (s *service) GetWarningOrder(ctx context.Context, f WarningFilter) ([]int64, error) {
+	// 1) ID по warning-статусам
+	statusIDs, err := s.repo.FetchWarningStatus(ctx, f)
+	if err != nil {
+		return nil, err
+	}
+
+	// 2) unpaid
+	unpaidIDs, err := s.repo.FetchUnpaid(ctx, UnpaidFilter{
+		BaseFilter:             f.BaseFilter,
+		StatusCompletedNotPaid: f.StatusCompletedNotPaid,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// 3) bad reviews
+	badIDs, err := s.repo.FetchBadReview(ctx, BadReviewFilter{
+		BaseFilter:   f.BaseFilter,
+		BadRatingMax: f.BadRatingMax,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// 4) real price > predv
+	realIDs, err := s.repo.FetchExceededPrice(ctx, ExceededPriceFilter{
+		BaseFilter:     f.BaseFilter,
+		MinRealPrice:   f.MinRealPrice,
+		FinishedStatus: f.FinishedStatus,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	idSet := make(map[int64]struct{})
+
+	for _, id := range statusIDs {
+		idSet[id] = struct{}{}
+	}
+	for _, id := range unpaidIDs {
+		idSet[id] = struct{}{}
+	}
+	for _, id := range badIDs {
+		idSet[id] = struct{}{}
+	}
+	for _, id := range realIDs {
+		idSet[id] = struct{}{}
+	}
+
+	result := make([]int64, 0, len(idSet))
+	for id := range idSet {
+		result = append(result, id)
+	}
+
+	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
+
+	return result, nil
 }

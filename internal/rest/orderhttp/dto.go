@@ -28,6 +28,16 @@ type ExceededPriceRequest struct {
 	MinRealPrice   float64 `json:"min_real_price"`
 	FinishedStatus []int64 `json:"finished_status"`
 }
+
+type WarningRequest struct {
+	OrderBaseRequest
+	WarningStatus          []int64 `json:"warning_status"`
+	StatusCompletedNotPaid int64   `json:"status_completed_not_paid"`
+	BadRatingMax           int64   `json:"bad_rating_max"`
+	MinRealPrice           float64 `json:"min_real_price"`
+	FinishedStatus         []int64 `json:"finished_status"`
+}
+
 type UnpaidResponse struct {
 	UnpaidIDs []int64 `json:"unpaid_order_ids"`
 }
@@ -38,4 +48,8 @@ type BadReviewResponse struct {
 
 type ExceededPriceResponse struct {
 	PriceIDs []int64 `json:"price_ids"`
+}
+
+type WarningResponse struct {
+	WarningOrderIDs []int64 `json:"warning_order_ids"`
 }
