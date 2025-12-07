@@ -167,3 +167,51 @@ func (h *Handler) GetWarningOrders(w http.ResponseWriter, r *http.Request) {
 		WarningOrderIDs: ids,
 	})
 }
+
+func (h *Handler) GetWarningPaginated(w http.ResponseWriter, r *http.Request) {
+	var req WarningPaginatedRequest
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	base := order.BaseFilter{
+		TenantID:       req.TenantID,
+		CityIDs:        req.CityIDs,
+		Date:           req.Date,
+		StatusTimeFrom: req.StatusTimeFrom,
+		StatusTimeTo:   req.StatusTimeTo,
+		Tariffs:        req.Tariffs,
+		UserPositions:  req.UserPositions,
+		SortField:      req.SortField,
+		SortOrder:      req.SortOrder,
+		Status:         req.Status,
+	}
+
+	page := req.Page
+	if page < 0 {
+		page = 0
+	}
+	pageSize := req.PageSize
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+
+	res, err := h.service.GetWarningGroupOrders(
+		r.Context(),
+		base,
+		req.WarningOrderIDs,
+		page,
+		pageSize,
+	)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, WarningPaginatedResponse{
+		TotalCount: res.TotalCount,
+		Orders:     res.Orders,
+	})
+}

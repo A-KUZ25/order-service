@@ -1,16 +1,18 @@
 package orderhttp
 
+import "orders-service/order"
+
 type OrderBaseRequest struct {
-	TenantID       int64    `json:"tenant_id"`
-	CityIDs        []int64  `json:"city_ids"`
-	Date           *string  `json:"date"`
-	StatusTimeFrom *int64   `json:"status_time_from"`
-	StatusTimeTo   *int64   `json:"status_time_to"`
-	Status         []string `json:"status"`
-	Tariffs        []int64  `json:"tariffs"`
-	UserPositions  []int64  `json:"user_positions"`
-	SortField      string   `json:"sort_field"`
-	SortOrder      string   `json:"sort_order"`
+	TenantID       int64   `json:"tenant_id"`
+	CityIDs        []int64 `json:"city_ids"`
+	Date           *string `json:"date"`
+	StatusTimeFrom *int64  `json:"status_time_from"`
+	StatusTimeTo   *int64  `json:"status_time_to"`
+	Status         []int64 `json:"status"`
+	Tariffs        []int64 `json:"tariffs"`
+	UserPositions  []int64 `json:"user_positions"`
+	SortField      string  `json:"sort_field"`
+	SortOrder      string  `json:"sort_order"`
 }
 
 type UnpaidRequest struct {
@@ -38,6 +40,14 @@ type WarningRequest struct {
 	FinishedStatus         []int64 `json:"finished_status"`
 }
 
+type WarningPaginatedRequest struct {
+	OrderBaseRequest
+	WarningOrderIDs []int64 `json:"warning_order_ids"`
+
+	Page     int `json:"page"`
+	PageSize int `json:"page_size"`
+}
+
 type UnpaidResponse struct {
 	UnpaidIDs []int64 `json:"unpaid_order_ids"`
 }
@@ -52,4 +62,9 @@ type ExceededPriceResponse struct {
 
 type WarningResponse struct {
 	WarningOrderIDs []int64 `json:"warning_order_ids"`
+}
+
+type WarningPaginatedResponse struct {
+	TotalCount int64             `json:"total_count"`
+	Orders     []order.FullOrder `json:"orders"`
 }

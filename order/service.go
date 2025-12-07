@@ -10,7 +10,7 @@ type SortOrder string
 type BaseFilter struct {
 	TenantID       int64
 	CityIDs        []int64
-	Status         []string
+	Status         []int64
 	Date           *string
 	StatusTimeFrom *int64
 	StatusTimeTo   *int64
@@ -54,6 +54,8 @@ type Repository interface {
 	FetchBadReview(ctx context.Context, f BadReviewFilter) ([]int64, error)
 	FetchExceededPrice(ctx context.Context, f ExceededPriceFilter) ([]int64, error)
 	FetchWarningStatus(ctx context.Context, f WarningFilter) ([]int64, error)
+	CountOrdersWithWarning(ctx context.Context, f BaseFilter, warningIDs []int64) (int64, error)
+	FetchOrdersWithWarning(ctx context.Context, f BaseFilter, warningIDs []int64, page, pageSize int) ([]FullOrder, error)
 }
 
 type Service interface {
@@ -61,6 +63,12 @@ type Service interface {
 	GetBadReview(ctx context.Context, f BadReviewFilter) ([]int64, error)
 	GetExceededPrice(ctx context.Context, f ExceededPriceFilter) ([]int64, error)
 	GetWarningOrder(ctx context.Context, f WarningFilter) ([]int64, error)
+	GetWarningGroupOrders(ctx context.Context, base BaseFilter, warningIDs []int64, page, pageSize int) (WarningGroupResult, error)
+}
+
+type WarningGroupResult struct {
+	TotalCount int64       `json:"total_count"`
+	Orders     []FullOrder `json:"orders"`
 }
 
 type service struct {
@@ -148,4 +156,27 @@ func (s *service) GetWarningOrder(ctx context.Context, f WarningFilter) ([]int64
 	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
 
 	return result, nil
+}
+
+func (s *service) GetWarningGroupOrders(
+	ctx context.Context,
+	base BaseFilter,
+	warningIDs []int64,
+	page, pageSize int,
+) (WarningGroupResult, error) {
+
+	cnt, err := s.repo.CountOrdersWithWarning(ctx, base, warningIDs)
+	if err != nil {
+		return WarningGroupResult{}, err
+	}
+
+	orders, err := s.repo.FetchOrdersWithWarning(ctx, base, warningIDs, page, pageSize)
+	if err != nil {
+		return WarningGroupResult{}, err
+	}
+
+	return WarningGroupResult{
+		TotalCount: cnt,
+		Orders:     orders,
+	}, nil
 }
