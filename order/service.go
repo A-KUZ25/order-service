@@ -2,7 +2,9 @@ package order
 
 import (
 	"context"
+	"log"
 	"sort"
+	"time"
 )
 
 type SortOrder string
@@ -99,63 +101,99 @@ func (s *service) GetExceededPrice(
 }
 
 func (s *service) GetWarningOrder(ctx context.Context, f WarningFilter) ([]int64, error) {
-	// 1) ID по warning-статусам
-	statusIDs, err := s.repo.FetchWarningStatus(ctx, f)
-	if err != nil {
-		return nil, err
+	start := time.Now()
+
+	type result struct {
+		ids []int64
+		err error
 	}
+
+	// Каналы для результатов
+	chStatus := make(chan result, 1)
+	chUnpaid := make(chan result, 1)
+	chBad := make(chan result, 1)
+	chReal := make(chan result, 1)
+
+	// 1) warning statuses
+	go func() {
+		ids, err := s.repo.FetchWarningStatus(ctx, f)
+		chStatus <- result{ids, err}
+	}()
 
 	// 2) unpaid
-	unpaidIDs, err := s.repo.FetchUnpaid(ctx, UnpaidFilter{
-		BaseFilter:             f.BaseFilter,
-		StatusCompletedNotPaid: f.StatusCompletedNotPaid,
-	})
-	if err != nil {
-		return nil, err
-	}
+	go func() {
+		ids, err := s.repo.FetchUnpaid(ctx, UnpaidFilter{
+			BaseFilter:             f.BaseFilter,
+			StatusCompletedNotPaid: f.StatusCompletedNotPaid,
+		})
+		chUnpaid <- result{ids, err}
+	}()
 
 	// 3) bad reviews
-	badIDs, err := s.repo.FetchBadReview(ctx, BadReviewFilter{
-		BaseFilter:   f.BaseFilter,
-		BadRatingMax: f.BadRatingMax,
-	})
-	if err != nil {
-		return nil, err
+	go func() {
+		ids, err := s.repo.FetchBadReview(ctx, BadReviewFilter{
+			BaseFilter:   f.BaseFilter,
+			BadRatingMax: f.BadRatingMax,
+		})
+		chBad <- result{ids, err}
+	}()
+
+	// 4) real > predv
+	go func() {
+		ids, err := s.repo.FetchExceededPrice(ctx, ExceededPriceFilter{
+			BaseFilter:     f.BaseFilter,
+			MinRealPrice:   f.MinRealPrice,
+			FinishedStatus: f.FinishedStatus,
+		})
+		chReal <- result{ids, err}
+	}()
+
+	// Ожидаем все четыре результата
+	resStatus := <-chStatus
+	resUnpaid := <-chUnpaid
+	resBad := <-chBad
+	resReal := <-chReal
+
+	// Проверяем ошибки
+	if resStatus.err != nil {
+		return nil, resStatus.err
+	}
+	if resUnpaid.err != nil {
+		return nil, resUnpaid.err
+	}
+	if resBad.err != nil {
+		return nil, resBad.err
+	}
+	if resReal.err != nil {
+		return nil, resReal.err
 	}
 
-	// 4) real price > predv
-	realIDs, err := s.repo.FetchExceededPrice(ctx, ExceededPriceFilter{
-		BaseFilter:     f.BaseFilter,
-		MinRealPrice:   f.MinRealPrice,
-		FinishedStatus: f.FinishedStatus,
-	})
-	if err != nil {
-		return nil, err
-	}
+	// Объединяем уникальные ID
+	idSet := make(map[int64]struct{}, len(resStatus.ids)+len(resUnpaid.ids)+len(resBad.ids)+len(resReal.ids))
 
-	idSet := make(map[int64]struct{})
-
-	for _, id := range statusIDs {
+	for _, id := range resStatus.ids {
 		idSet[id] = struct{}{}
 	}
-	for _, id := range unpaidIDs {
+	for _, id := range resUnpaid.ids {
 		idSet[id] = struct{}{}
 	}
-	for _, id := range badIDs {
+	for _, id := range resBad.ids {
 		idSet[id] = struct{}{}
 	}
-	for _, id := range realIDs {
+	for _, id := range resReal.ids {
 		idSet[id] = struct{}{}
 	}
 
-	result := make([]int64, 0, len(idSet))
+	resultIDs := make([]int64, 0, len(idSet))
 	for id := range idSet {
-		result = append(result, id)
+		resultIDs = append(resultIDs, id)
 	}
 
-	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
+	sort.Slice(resultIDs, func(i, j int) bool { return resultIDs[i] < resultIDs[j] })
 
-	return result, nil
+	log.Println("Execution took:", time.Since(start))
+
+	return resultIDs, nil
 }
 
 func (s *service) GetWarningGroupOrders(
