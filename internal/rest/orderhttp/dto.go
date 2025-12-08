@@ -48,6 +48,17 @@ type WarningPaginatedRequest struct {
 	PageSize int `json:"page_size"`
 }
 
+type WarningFullRequest struct {
+	OrderBaseRequest
+	WarningStatus          []int64 `json:"warning_status"`
+	StatusCompletedNotPaid int64   `json:"status_completed_not_paid"`
+	BadRatingMax           int64   `json:"bad_rating_max"`
+	MinRealPrice           float64 `json:"min_real_price"`
+	FinishedStatus         []int64 `json:"finished_status"`
+	Page                   int     `json:"page"`
+	PageSize               int     `json:"page_size"`
+}
+
 type UnpaidResponse struct {
 	UnpaidIDs []int64 `json:"unpaid_order_ids"`
 }
@@ -67,4 +78,10 @@ type WarningResponse struct {
 type WarningPaginatedResponse struct {
 	TotalCount int64             `json:"total_count"`
 	Orders     []order.FullOrder `json:"orders"`
+}
+
+type WarningFullResponse struct {
+	WarningOrderIDs []int64           `json:"warning_order_ids"`
+	TotalCount      int64             `json:"total_count"`
+	Orders          []order.FullOrder `json:"orders"`
 }

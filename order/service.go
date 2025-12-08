@@ -65,12 +65,13 @@ type Service interface {
 	GetBadReview(ctx context.Context, f BadReviewFilter) ([]int64, error)
 	GetExceededPrice(ctx context.Context, f ExceededPriceFilter) ([]int64, error)
 	GetWarningOrder(ctx context.Context, f WarningFilter) ([]int64, error)
-	GetWarningGroupOrders(ctx context.Context, base BaseFilter, warningIDs []int64, page, pageSize int) (WarningGroupResult, error)
+	GetWarningFull(ctx context.Context, f WarningFilter, page, pageSize int) (WarningGroupResult, error)
 }
 
 type WarningGroupResult struct {
-	TotalCount int64       `json:"total_count"`
-	Orders     []FullOrder `json:"orders"`
+	WarningOrderIDs []int64
+	TotalCount      int64       `json:"total_count"`
+	Orders          []FullOrder `json:"orders"`
 }
 
 type service struct {
@@ -101,14 +102,12 @@ func (s *service) GetExceededPrice(
 }
 
 func (s *service) GetWarningOrder(ctx context.Context, f WarningFilter) ([]int64, error) {
-	start := time.Now()
 
 	type result struct {
 		ids []int64
 		err error
 	}
 
-	// Каналы для результатов
 	chStatus := make(chan result, 1)
 	chUnpaid := make(chan result, 1)
 	chBad := make(chan result, 1)
@@ -148,13 +147,11 @@ func (s *service) GetWarningOrder(ctx context.Context, f WarningFilter) ([]int64
 		chReal <- result{ids, err}
 	}()
 
-	// Ожидаем все четыре результата
 	resStatus := <-chStatus
 	resUnpaid := <-chUnpaid
 	resBad := <-chBad
 	resReal := <-chReal
 
-	// Проверяем ошибки
 	if resStatus.err != nil {
 		return nil, resStatus.err
 	}
@@ -191,30 +188,40 @@ func (s *service) GetWarningOrder(ctx context.Context, f WarningFilter) ([]int64
 
 	sort.Slice(resultIDs, func(i, j int) bool { return resultIDs[i] < resultIDs[j] })
 
-	log.Println("Execution took:", time.Since(start))
-
 	return resultIDs, nil
 }
 
-func (s *service) GetWarningGroupOrders(
+func (s *service) GetWarningFull(
 	ctx context.Context,
-	base BaseFilter,
-	warningIDs []int64,
+	f WarningFilter,
 	page, pageSize int,
 ) (WarningGroupResult, error) {
 
-	cnt, err := s.repo.CountOrdersWithWarning(ctx, base, warningIDs)
+	start := time.Now()
+	// 1) получаем ID warning-заказов
+	warningIDs, err := s.GetWarningOrder(ctx, f)
 	if err != nil {
 		return WarningGroupResult{}, err
 	}
 
-	orders, err := s.repo.FetchOrdersWithWarning(ctx, base, warningIDs, page, pageSize)
+	//todo Тут явно стоит переработать подсчет и сделать без базы
+
+	// 2) считаем count
+	cnt, err := s.repo.CountOrdersWithWarning(ctx, f.BaseFilter, warningIDs)
 	if err != nil {
 		return WarningGroupResult{}, err
 	}
+
+	// 3) тянем пагинированные заказы
+	orders, err := s.repo.FetchOrdersWithWarning(ctx, f.BaseFilter, warningIDs, page, pageSize)
+	if err != nil {
+		return WarningGroupResult{}, err
+	}
+	log.Println("Execution took:", time.Since(start))
 
 	return WarningGroupResult{
-		TotalCount: cnt,
-		Orders:     orders,
+		WarningOrderIDs: warningIDs,
+		TotalCount:      cnt,
+		Orders:          orders,
 	}, nil
 }

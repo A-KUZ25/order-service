@@ -3,7 +3,6 @@ package mysql
 import (
 	"context"
 	"database/sql"
-	"log"
 	"orders-service/order"
 	"strings"
 )
@@ -130,11 +129,11 @@ func (r *OrdersRepository) FetchUnpaid(
 	sb.WriteString(`
 SELECT o.order_id
 FROM tbl_order o
-WHERE 1=1
+WHERE ( 1=1
 `)
 
 	r.buildBaseQuery(&sb, &args, f.BaseFilter)
-
+	sb.WriteString(") ")
 	// Специфичная часть unpaid
 	sb.WriteString("  AND o.status_id = ?\n")
 	args = append(args, f.StatusCompletedNotPaid)
@@ -156,11 +155,11 @@ func (r *OrdersRepository) FetchBadReview(
 SELECT o.order_id
 FROM tbl_order o
 LEFT JOIN tbl_client_review cr ON o.order_id = cr.order_id
-WHERE 1=1
+WHERE ( 1=1
 `)
 
 	r.buildBaseQuery(&sb, &args, f.BaseFilter)
-
+	sb.WriteString(") ")
 	// специфично bad reviews
 	sb.WriteString("  AND cr.rating BETWEEN 1 AND ?\n")
 	args = append(args, f.BadRatingMax)
@@ -181,11 +180,11 @@ func (r *OrdersRepository) FetchExceededPrice(
 	sb.WriteString(`
 SELECT o.order_id
 FROM tbl_order o
-WHERE 1=1
+WHERE ( 1=1
 `)
 
 	r.buildBaseQuery(&sb, &args, f.BaseFilter)
-
+	sb.WriteString(") ")
 	//статус не должен быть финальным
 	if len(f.FinishedStatus) > 0 {
 		sb.WriteString("  AND o.status_id NOT IN (")
@@ -219,11 +218,11 @@ func (r *OrdersRepository) FetchWarningStatus(
 	sb.WriteString(`
 SELECT o.order_id
 FROM tbl_order o
-WHERE 1=1
+WHERE ( 1=1
 `)
 
 	r.buildBaseQuery(&sb, &args, f.BaseFilter)
-
+	sb.WriteString(") ")
 	if len(f.WarningStatus) > 0 {
 		sb.WriteString("  AND o.status_id IN (")
 		for i, st := range f.WarningStatus {
@@ -253,11 +252,11 @@ func (r *OrdersRepository) CountOrdersWithWarning(
 	sb.WriteString(`
 SELECT COUNT(*)
 FROM tbl_order o
-WHERE 1=1
+WHERE ( 1=1
 `)
 
 	r.buildBaseQuery(&sb, &args, f)
-
+	sb.WriteString(") ")
 	if len(warningIDs) > 0 {
 		sb.WriteString(" OR o.order_id IN (")
 		for i, id := range warningIDs {
@@ -417,7 +416,6 @@ WHERE ( 1=1
 	sb.WriteString(" LIMIT ? OFFSET ?")
 	args = append(args, pageSize, page*pageSize)
 
-	log.Printf("GO SQL:\n%s\nARGS: %#v\n", sb.String(), args)
 	rows, err := r.db.QueryContext(ctx, sb.String(), args...)
 	if err != nil {
 		return nil, err

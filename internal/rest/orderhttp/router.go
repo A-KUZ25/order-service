@@ -7,5 +7,4 @@ func RegisterRoutes(r chi.Router, handler *Handler) {
 	r.Post("/orders/bad-review", handler.BadReview)
 	r.Post("/orders/exceeded-price", handler.ExceededPrice)
 	r.Post("/orders/warning", handler.GetWarningOrders)
-	r.Post("/orders/warning-paginated", handler.GetWarningPaginated)
 }
