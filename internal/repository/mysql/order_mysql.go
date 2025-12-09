@@ -3,8 +3,10 @@ package mysql
 import (
 	"context"
 	"database/sql"
+	"log"
 	"orders-service/order"
 	"strings"
+	"time"
 )
 
 type OrdersRepository struct {
@@ -101,11 +103,13 @@ func (r *OrdersRepository) executeQuery(
 	args []any,
 ) ([]int64, error) {
 
+	start := time.Now()
 	rows, err := r.db.QueryContext(ctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+	log.Println("BASE REQUEST TIME:", time.Since(start))
 
 	var ids []int64
 	for rows.Next() {
