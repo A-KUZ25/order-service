@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"sort"
+	"sync"
 	"time"
 )
 
@@ -198,25 +199,57 @@ func (s *service) GetWarningFull(
 ) (WarningGroupResult, error) {
 
 	start := time.Now()
-	// 1) получаем ID warning-заказов
+
+	// 1) warning IDs — сначала (внутри у тебя уже 4 параллельных SQL)
 	warningIDs, err := s.GetWarningOrder(ctx, f)
 	if err != nil {
 		return WarningGroupResult{}, err
 	}
 
-	//todo Тут явно стоит переработать подсчет и сделать без базы
+	// 2) параллельно считаем COUNT и PAGINATED
+	var (
+		cnt    int64
+		orders []FullOrder
+	)
 
-	// 2) считаем count
-	cnt, err := s.repo.CountOrdersWithWarning(ctx, f.BaseFilter, warningIDs)
-	if err != nil {
-		return WarningGroupResult{}, err
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	errCh := make(chan error, 2)
+
+	// COUNT goroutine
+	go func() {
+		defer wg.Done()
+
+		c, err := s.repo.CountOrdersWithWarning(ctx, f.BaseFilter, warningIDs)
+		if err != nil {
+			errCh <- err
+			return
+		}
+		cnt = c
+	}()
+
+	// PAGINATED goroutine
+	go func() {
+		defer wg.Done()
+
+		ords, err := s.repo.FetchOrdersWithWarning(ctx, f.BaseFilter, warningIDs, page, pageSize)
+		if err != nil {
+			errCh <- err
+			return
+		}
+		orders = ords
+	}()
+
+	wg.Wait()
+	close(errCh)
+
+	for e := range errCh {
+		if e != nil {
+			return WarningGroupResult{}, e
+		}
 	}
 
-	// 3) тянем пагинированные заказы
-	orders, err := s.repo.FetchOrdersWithWarning(ctx, f.BaseFilter, warningIDs, page, pageSize)
-	if err != nil {
-		return WarningGroupResult{}, err
-	}
 	log.Println("Execution took:", time.Since(start))
 
 	return WarningGroupResult{
