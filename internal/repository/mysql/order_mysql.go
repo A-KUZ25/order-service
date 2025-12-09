@@ -272,9 +272,9 @@ WHERE ( 1=1
 		}
 		sb.WriteString(")\n")
 	}
-
+	start := time.Now()
 	row := r.db.QueryRowContext(ctx, sb.String(), args...)
-
+	log.Println("BASE REQUEST TIME:", time.Since(start))
 	var cnt int64
 	if err := row.Scan(&cnt); err != nil {
 		return 0, err
@@ -420,7 +420,11 @@ WHERE ( 1=1
 	sb.WriteString(" LIMIT ? OFFSET ?")
 	args = append(args, pageSize, page*pageSize)
 
+	start := time.Now()
+
 	rows, err := r.db.QueryContext(ctx, sb.String(), args...)
+
+	log.Println("BASE REQUEST TIME:", time.Since(start))
 	if err != nil {
 		return nil, err
 	}
