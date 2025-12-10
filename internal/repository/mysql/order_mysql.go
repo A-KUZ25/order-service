@@ -3,8 +3,10 @@ package mysql
 import (
 	"context"
 	"database/sql"
+	"log"
 	"orders-service/order"
 	"strings"
+	"time"
 )
 
 type OrdersRepository struct {
@@ -101,11 +103,13 @@ func (r *OrdersRepository) executeQuery(
 	args []any,
 ) ([]int64, error) {
 
+	start := time.Now()
 	rows, err := r.db.QueryContext(ctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+	log.Println("BASE REQUEST TIME:", time.Since(start))
 
 	var ids []int64
 	for rows.Next() {
@@ -268,9 +272,9 @@ WHERE ( 1=1
 		}
 		sb.WriteString(")\n")
 	}
-
+	start := time.Now()
 	row := r.db.QueryRowContext(ctx, sb.String(), args...)
-
+	log.Println("BASE REQUEST TIME:", time.Since(start))
 	var cnt int64
 	if err := row.Scan(&cnt); err != nil {
 		return 0, err
@@ -416,7 +420,11 @@ WHERE ( 1=1
 	sb.WriteString(" LIMIT ? OFFSET ?")
 	args = append(args, pageSize, page*pageSize)
 
+	start := time.Now()
+
 	rows, err := r.db.QueryContext(ctx, sb.String(), args...)
+
+	log.Println("BASE REQUEST TIME:", time.Since(start))
 	if err != nil {
 		return nil, err
 	}
