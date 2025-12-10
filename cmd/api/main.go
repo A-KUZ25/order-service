@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"orders-service/internal/db"
@@ -8,6 +9,9 @@ import (
 	"orders-service/internal/rest/orderhttp"
 	"orders-service/order"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/joho/godotenv"
@@ -39,9 +43,48 @@ func main() {
 
 	r := chi.NewRouter()
 	orderhttp.RegisterRoutes(r, handler)
-	port := os.Getenv("GO_PORT")
-	log.Printf("server started at :%s\n", port)
-	http.ListenAndServe(":"+port, r)
 
-	defer mysqlDB.Close()
+	port := os.Getenv("GO_PORT")
+	srv := &http.Server{
+		Addr:         ":" + port,
+		Handler:      r,
+		ReadTimeout:  5 * time.Second,  // время ожидания чтения запроса
+		WriteTimeout: 10 * time.Second, // время на запись ответа
+		IdleTimeout:  60 * time.Second, // время простоя соединения
+	}
+
+	serverErrCh := make(chan error, 1)
+	go func() {
+		log.Printf("server started at :%s\n", port)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			serverErrCh <- err
+		}
+		close(serverErrCh)
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	select {
+	case sig := <-quit:
+		log.Printf("shutdown signal received: %s", sig.String())
+	case err := <-serverErrCh:
+		if err != nil {
+			log.Printf("server error: %v", err)
+		}
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		// если graceful не удался, логируем и пробуем принудительно Close
+		log.Printf("graceful shutdown failed: %v", err)
+		if err := srv.Close(); err != nil {
+			log.Printf("server close failed: %v", err)
+		}
+	} else {
+		log.Println("server shutdown gracefully")
+	}
+
 }
