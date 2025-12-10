@@ -22,6 +22,14 @@ func main() {
 		log.Fatalf("mysql init error: %v", err)
 	}
 
+	defer func() {
+		if err := mysqlDB.Close(); err != nil {
+			log.Printf("error closing db: %v", err)
+		} else {
+			log.Println("db closed")
+		}
+	}()
+
 	repo, err := mysql.NewOrdersRepository(mysqlDB)
 	if err != nil {
 		log.Fatalf("Repository init error: %v", err)
@@ -35,5 +43,5 @@ func main() {
 	log.Printf("server started at :%s\n", port)
 	http.ListenAndServe(":"+port, r)
 
-	_ = mysqlDB
+	defer mysqlDB.Close()
 }
