@@ -19,6 +19,7 @@ type BaseFilter struct {
 	StatusTimeTo   *int64
 	Tariffs        []int64
 	UserPositions  []int64
+	Group          string
 
 	SortField string
 	SortOrder string
@@ -67,6 +68,7 @@ type Service interface {
 	GetExceededPrice(ctx context.Context, f ExceededPriceFilter) ([]int64, error)
 	GetWarningOrder(ctx context.Context, f WarningFilter) ([]int64, error)
 	GetWarningFull(ctx context.Context, f WarningFilter, page, pageSize int) (WarningGroupResult, error)
+	GetOrdersByGroup(ctx context.Context, f WarningFilter, page, pageSize int) (int64, []FullOrder, error)
 }
 
 type WarningGroupResult struct {
@@ -257,4 +259,48 @@ func (s *service) GetWarningFull(
 		TotalCount:      cnt,
 		Orders:          orders,
 	}, nil
+}
+
+func (s *service) GetOrdersByGroup(
+	ctx context.Context,
+	f WarningFilter,
+	page, pageSize int,
+) (int64, []FullOrder, error) {
+
+	var (
+		ordersCount     int64
+		ordersPaginated []FullOrder
+		err             error
+	)
+	// Если это "warning" группа — нужно учитывать warningOrderIDs (OR o.order_id IN (...))
+	// В PHP: для STATUS_GROUP_7 -> if empty(warningOrderIds) ? count() : orFilterWhere(...)->count()
+	if f.BaseFilter.Group == "warning" {
+		warningOrderIDs, err := s.GetWarningOrder(ctx, f)
+		// Если warningOrderIDs пуст — это просто обычный подсчёт/пагинация по baseFilter
+		// В противном случае используем их как дополнительный OR (CountOrdersWithWarning / FetchOrdersWithWarning реализуют это).
+		ordersCount, err = s.repo.CountOrdersWithWarning(ctx, f.BaseFilter, warningOrderIDs)
+		if err != nil {
+			return 0, nil, err
+		}
+
+		ordersPaginated, err = s.repo.FetchOrdersWithWarning(ctx, f.BaseFilter, warningOrderIDs, page, pageSize)
+		if err != nil {
+			return 0, nil, err
+		}
+
+		return ordersCount, ordersPaginated, nil
+	}
+
+	// default case: обычная группа — считаем и берем страницы только по baseFilter (warningOrderIDs игнорируем)
+	ordersCount, err = s.repo.CountOrdersWithWarning(ctx, f.BaseFilter, nil)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	ordersPaginated, err = s.repo.FetchOrdersWithWarning(ctx, f.BaseFilter, nil, page, pageSize)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	return ordersCount, ordersPaginated, nil
 }

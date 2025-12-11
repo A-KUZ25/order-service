@@ -57,6 +57,7 @@ type WarningFullRequest struct {
 	FinishedStatus         []int64 `json:"finished_status"`
 	Page                   int     `json:"page"`
 	PageSize               int     `json:"page_size"`
+	Group                  string  `json:"group"`
 }
 
 type UnpaidResponse struct {

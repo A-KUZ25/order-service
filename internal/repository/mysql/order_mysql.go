@@ -3,6 +3,7 @@ package mysql
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log"
 	"orders-service/order"
 	"strings"
@@ -18,8 +19,11 @@ func NewOrdersRepository(db *sql.DB) (*OrdersRepository, error) {
 }
 
 // строит общую часть WHERE (tenant, active, date-range, city, tariffs…)
-func (r *OrdersRepository) buildBaseQuery(sb *strings.Builder, args *[]any, f order.BaseFilter) {
-
+func (r *OrdersRepository) buildBaseQuery(sb *strings.Builder, args *[]any, f order.BaseFilter, warn ...bool) {
+	warning := false
+	if len(warn) > 0 {
+		warning = true
+	}
 	sb.WriteString(" AND o.tenant_id = ? ")
 	*args = append(*args, f.TenantID)
 
@@ -70,16 +74,19 @@ func (r *OrdersRepository) buildBaseQuery(sb *strings.Builder, args *[]any, f or
 		sb.WriteString(")\n")
 	}
 
-	if len(f.Status) > 0 {
-		sb.WriteString(" AND o.status_id IN (")
-		for i, st := range f.Status {
-			if i > 0 {
-				sb.WriteString(",")
+	// status
+	if !warning {
+		if len(f.Status) > 0 {
+			sb.WriteString(" AND o.status_id IN (")
+			for i, st := range f.Status {
+				if i > 0 {
+					sb.WriteString(",")
+				}
+				sb.WriteString("?")
+				*args = append(*args, st)
 			}
-			sb.WriteString("?")
-			*args = append(*args, st)
+			sb.WriteString(")\n")
 		}
-		sb.WriteString(")\n")
 	}
 }
 
@@ -136,7 +143,7 @@ FROM tbl_order o
 WHERE ( 1=1
 `)
 
-	r.buildBaseQuery(&sb, &args, f.BaseFilter)
+	r.buildBaseQuery(&sb, &args, f.BaseFilter, true)
 	sb.WriteString(") ")
 	// Специфичная часть unpaid
 	sb.WriteString("  AND o.status_id = ?\n")
@@ -162,7 +169,7 @@ LEFT JOIN tbl_client_review cr ON o.order_id = cr.order_id
 WHERE ( 1=1
 `)
 
-	r.buildBaseQuery(&sb, &args, f.BaseFilter)
+	r.buildBaseQuery(&sb, &args, f.BaseFilter, true)
 	sb.WriteString(") ")
 	// специфично bad reviews
 	sb.WriteString("  AND cr.rating BETWEEN 1 AND ?\n")
@@ -187,7 +194,7 @@ FROM tbl_order o
 WHERE ( 1=1
 `)
 
-	r.buildBaseQuery(&sb, &args, f.BaseFilter)
+	r.buildBaseQuery(&sb, &args, f.BaseFilter, true)
 	sb.WriteString(") ")
 	//статус не должен быть финальным
 	if len(f.FinishedStatus) > 0 {
@@ -207,7 +214,8 @@ WHERE ( 1=1
 	args = append(args, f.MinRealPrice)
 
 	r.appendOrderBy(&sb, f.BaseFilter)
-
+	formatted := formatQuery(sb.String(), args)
+	log.Printf("DEBUG: executing SQL: %s\n", formatted)
 	return r.executeQuery(ctx, sb.String(), args)
 }
 
@@ -225,7 +233,7 @@ FROM tbl_order o
 WHERE ( 1=1
 `)
 
-	r.buildBaseQuery(&sb, &args, f.BaseFilter)
+	r.buildBaseQuery(&sb, &args, f.BaseFilter, true)
 	sb.WriteString(") ")
 	if len(f.WarningStatus) > 0 {
 		sb.WriteString("  AND o.status_id IN (")
@@ -275,6 +283,7 @@ WHERE ( 1=1
 	start := time.Now()
 	row := r.db.QueryRowContext(ctx, sb.String(), args...)
 	log.Println("BASE REQUEST TIME:", time.Since(start))
+
 	var cnt int64
 	if err := row.Scan(&cnt); err != nil {
 		return 0, err
@@ -543,4 +552,48 @@ WHERE ( 1=1
 	}
 
 	return result, nil
+}
+
+func formatArg(a any) string {
+	switch v := a.(type) {
+	case string:
+		return "'" + strings.ReplaceAll(v, "'", "''") + "'"
+	case []byte:
+		return "'" + strings.ReplaceAll(string(v), "'", "''") + "'"
+	case time.Time:
+		return "'" + v.Format("2006-01-02 15:04:05") + "'"
+	case nil:
+		return "NULL"
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+}
+
+// formatQuery заменяет "?" последовательно на отформатированные аргументы.
+// ВАЖНО: только для чтения/отладки — не использовать для исполнения.
+// Если args длиннее количества ? — оставляет оставшиеся args в конце.
+func formatQuery(sqlStr string, args []any) string {
+	var b strings.Builder
+	r := strings.NewReplacer("\n", " ", "\t", " ")
+	sqlStr = r.Replace(sqlStr)
+	// простая последовательная замена ? на форматArg
+	parts := strings.Split(sqlStr, "?")
+	for i, p := range parts {
+		b.WriteString(p)
+		if i < len(args) {
+			b.WriteString(formatArg(args[i]))
+		}
+	}
+	// если args больше чем ?, добавим их в конец (дебаг)
+	if len(args) > len(parts)-1 {
+		b.WriteString(" /* extra args: ")
+		for i := len(parts) - 1; i < len(args); i++ {
+			if i > len(parts)-1 {
+				b.WriteString(", ")
+			}
+			b.WriteString(formatArg(args[i]))
+		}
+		b.WriteString(" */")
+	}
+	return b.String()
 }
