@@ -288,7 +288,7 @@ func (s *service) GetOrdersByGroup(
 		if err != nil {
 			return 0, nil, err
 		}
-
+		log.Println("Execution took:", time.Since(start))
 		return ordersCount, ordersPaginated, nil
 	}
 

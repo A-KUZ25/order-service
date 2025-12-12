@@ -214,8 +214,7 @@ WHERE ( 1=1
 	args = append(args, f.MinRealPrice)
 
 	r.appendOrderBy(&sb, f.BaseFilter)
-	formatted := formatQuery(sb.String(), args)
-	log.Printf("DEBUG: executing SQL: %s\n", formatted)
+
 	return r.executeQuery(ctx, sb.String(), args)
 }
 
