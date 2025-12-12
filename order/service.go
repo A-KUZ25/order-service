@@ -272,6 +272,7 @@ func (s *service) GetOrdersByGroup(
 		ordersPaginated []FullOrder
 		err             error
 	)
+	start := time.Now()
 	// Если это "warning" группа — нужно учитывать warningOrderIDs (OR o.order_id IN (...))
 	// В PHP: для STATUS_GROUP_7 -> if empty(warningOrderIds) ? count() : orFilterWhere(...)->count()
 	if f.BaseFilter.Group == "warning" {
@@ -301,6 +302,6 @@ func (s *service) GetOrdersByGroup(
 	if err != nil {
 		return 0, nil, err
 	}
-
+	log.Println("Execution took:", time.Since(start))
 	return ordersCount, ordersPaginated, nil
 }
