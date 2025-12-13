@@ -81,3 +81,52 @@ func (h *Handler) OrdersByGroup(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, resp)
 }
+
+func (h *Handler) OrderForTabs(w http.ResponseWriter, r *http.Request) {
+	var req WarningFullRequest
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	base := order.BaseFilter{
+		TenantID:       req.TenantID,
+		CityIDs:        req.CityIDs,
+		Date:           req.Date,
+		StatusTimeFrom: req.StatusTimeFrom,
+		StatusTimeTo:   req.StatusTimeTo,
+		Tariffs:        req.Tariffs,
+		UserPositions:  req.UserPositions,
+		SortField:      req.SortField,
+		SortOrder:      req.SortOrder,
+		Status:         req.Status,
+		Group:          req.Group,
+	}
+
+	f := order.WarningFilter{
+		BaseFilter:             base,
+		WarningStatus:          req.WarningStatus,
+		FinishedStatus:         req.FinishedStatus,
+		BadRatingMax:           req.BadRatingMax,
+		StatusCompletedNotPaid: req.StatusCompletedNotPaid,
+		MinRealPrice:           req.MinRealPrice,
+	}
+	ctx := r.Context()
+	result, err := h.service.GetOrdersForTabs(ctx, f)
+	if err != nil {
+		http.Error(w, "internal error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	resp := struct {
+		OrderCounts     map[order.StatusGroup]int     `json:"order_counts"`
+		OrdersForSignal map[order.StatusGroup][]int64 `json:"orders_for_signal"`
+	}{
+		OrderCounts:     result.GroupCounts,
+		OrdersForSignal: result.OrdersForSignal,
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+
+}

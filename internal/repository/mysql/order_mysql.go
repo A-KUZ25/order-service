@@ -596,3 +596,40 @@ func formatQuery(sqlStr string, args []any) string {
 	}
 	return b.String()
 }
+
+func (r *OrdersRepository) FetchOrdersByStatusGroup(
+	ctx context.Context,
+	f order.BaseFilter,
+	statusIDs []int64,
+) ([]int64, error) {
+
+	var sb strings.Builder
+	args := []any{}
+
+	sb.WriteString(`
+SELECT o.order_id
+FROM tbl_order o
+WHERE (1=1
+`)
+
+	// базовые фильтры (tenant, city, date, tariffs, positions, status_time)
+	r.buildBaseQuery(&sb, &args, f)
+	sb.WriteString(") ")
+
+	// group statuses
+	if len(statusIDs) > 0 {
+		sb.WriteString(" AND o.status_id IN (")
+		for i, st := range statusIDs {
+			if i > 0 {
+				sb.WriteString(",")
+			}
+			sb.WriteString("?")
+			args = append(args, st)
+		}
+		sb.WriteString(")\n")
+	}
+
+	r.appendOrderBy(&sb, f)
+
+	return r.executeQuery(ctx, sb.String(), args)
+}

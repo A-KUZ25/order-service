@@ -2,6 +2,7 @@ package order
 
 import (
 	"context"
+	"errors"
 	"log"
 	"sort"
 	"time"
@@ -59,13 +60,36 @@ type Repository interface {
 	FetchBadReview(ctx context.Context, f BadReviewFilter) ([]int64, error)
 	FetchExceededPrice(ctx context.Context, f ExceededPriceFilter) ([]int64, error)
 	FetchWarningStatus(ctx context.Context, f WarningFilter) ([]int64, error)
-	CountOrdersWithWarning(ctx context.Context, f BaseFilter, warningIDs []int64) (int64, error)
-	FetchOrdersWithWarning(ctx context.Context, f BaseFilter, warningIDs []int64, page, pageSize int) ([]FullOrder, error)
+	CountOrdersWithWarning(
+		ctx context.Context,
+		f BaseFilter,
+		warningIDs []int64,
+	) (int64, error)
+	FetchOrdersWithWarning(
+		ctx context.Context,
+		f BaseFilter, warningIDs []int64,
+		page,
+		pageSize int,
+	) ([]FullOrder, error)
+	FetchOrdersByStatusGroup(
+		ctx context.Context,
+		f BaseFilter,
+		statusIDs []int64,
+	) ([]int64, error)
 }
 
 type Service interface {
 	GetWarningOrder(ctx context.Context, f WarningFilter) ([]int64, error)
-	GetOrdersByGroup(ctx context.Context, f WarningFilter, page, pageSize int) (int64, []FullOrder, error)
+	GetOrdersByGroup(
+		ctx context.Context,
+		f WarningFilter,
+		page,
+		pageSize int,
+	) (int64, []FullOrder, error)
+	GetOrdersForTabs(
+		ctx context.Context,
+		f WarningFilter,
+	) (GroupOrdersResult, error)
 }
 
 type WarningGroupResult struct {
@@ -95,17 +119,7 @@ func (s *service) GetWarningOrder(ctx context.Context, f WarningFilter) ([]int64
 		realIDs   []int64
 	)
 
-	// 1) warning statuses
-	g.Go(func() error {
-		ids, err := s.repo.FetchWarningStatus(ctx, f)
-		if err != nil {
-			return err
-		}
-		statusIDs = ids
-		return nil
-	})
-
-	// 2) unpaid
+	// 1) unpaid
 	g.Go(func() error {
 		ids, err := s.repo.FetchUnpaid(ctx, UnpaidFilter{
 			BaseFilter:             f.BaseFilter,
@@ -118,7 +132,7 @@ func (s *service) GetWarningOrder(ctx context.Context, f WarningFilter) ([]int64
 		return nil
 	})
 
-	// 3) bad reviews
+	// 2) bad reviews
 	g.Go(func() error {
 		ids, err := s.repo.FetchBadReview(ctx, BadReviewFilter{
 			BaseFilter:   f.BaseFilter,
@@ -131,7 +145,7 @@ func (s *service) GetWarningOrder(ctx context.Context, f WarningFilter) ([]int64
 		return nil
 	})
 
-	// 4) real > predv
+	// 3) real > predv
 	g.Go(func() error {
 		ids, err := s.repo.FetchExceededPrice(ctx, ExceededPriceFilter{
 			BaseFilter:     f.BaseFilter,
@@ -195,6 +209,7 @@ func (s *service) GetOrdersByGroup(
 	// Если это "warning" группа — нужно учитывать warningOrderIDs (OR o.order_id IN (...))
 	// В PHP: для STATUS_GROUP_7 -> if empty(warningOrderIds) ? count() : orFilterWhere(...)->count()
 	if f.BaseFilter.Group == "warning" {
+
 		warningOrderIDs, err := s.GetWarningOrder(ctx, f)
 		if err != nil {
 			return 0, nil, err
@@ -254,4 +269,149 @@ func (s *service) GetOrdersByGroup(
 	}
 	log.Println("Execution took:", time.Since(start))
 	return ordersCount, ordersPaginated, nil
+}
+
+type StatusGroup string
+
+const (
+	StatusGroup0 StatusGroup = "new"
+	StatusGroup6 StatusGroup = "pre_order"
+	StatusGroup7 StatusGroup = "warning" // warning
+	StatusGroup8 StatusGroup = "works"
+)
+
+type GroupOrdersResult struct {
+	GroupCounts     map[StatusGroup]int
+	OrdersForSignal map[StatusGroup][]int64
+}
+
+var orderGroupIds = map[StatusGroup][]int64{
+	StatusGroup0: {
+		1, 2, 3, 4, 5, 52, 108, 109, 115, 127, 128, 130, 131,
+	},
+	StatusGroup6: {
+		6, 7, 16, 111, 112, 116, 117, 118, 119,
+	},
+	StatusGroup7: {
+		5, 10, 16, 27, 30, 38, 45, 46, 47, 48,
+		52, 54, 117, 118, 129, 135,
+	},
+	StatusGroup8: {
+		17, 26, 27, 29, 30, 36, 54, 55,
+		106, 110, 113, 114,
+		132, 133, 134, 135, 136,
+	},
+}
+
+func (s *service) GetOrdersForTabs(
+	ctx context.Context,
+	f WarningFilter,
+) (GroupOrdersResult, error) {
+
+	type groupResult struct {
+		group StatusGroup
+		ids   []int64
+	}
+
+	g, ctx := errgroup.WithContext(ctx)
+
+	results := make(chan groupResult, 4)
+
+	statusIDs, ok := orderGroupIds[StatusGroup(f.BaseFilter.Group)]
+	if !ok {
+		return GroupOrdersResult{}, errors.New("unknown status group")
+	}
+
+	// ---------- GROUP 0 ----------
+	g.Go(func() error {
+		ids, err := s.repo.FetchOrdersByStatusGroup(ctx, f.BaseFilter, statusIDs)
+		if err != nil {
+			return err
+		}
+		results <- groupResult{StatusGroup0, ids}
+		return nil
+	})
+
+	// ---------- GROUP 6 ----------
+	g.Go(func() error {
+		ids, err := s.repo.FetchOrdersByStatusGroup(ctx, f.BaseFilter, statusIDs)
+		if err != nil {
+			return err
+		}
+		results <- groupResult{StatusGroup6, ids}
+		return nil
+	})
+
+	// ---------- GROUP 7 (base, без warning расширения) ----------
+	g.Go(func() error {
+		ids, err := s.repo.FetchOrdersByStatusGroup(ctx, f.BaseFilter, statusIDs)
+		if err != nil {
+			return err
+		}
+		results <- groupResult{StatusGroup7, ids}
+		return nil
+	})
+
+	// ---------- GROUP 8 ----------
+	g.Go(func() error {
+		ids, err := s.repo.FetchOrdersByStatusGroup(ctx, f.BaseFilter, statusIDs)
+		if err != nil {
+			return err
+		}
+		results <- groupResult{StatusGroup8, ids}
+		return nil
+	})
+
+	go func() {
+		_ = g.Wait()
+		close(results)
+	}()
+
+	groupOrders := make(map[StatusGroup][]int64, 4)
+
+	for res := range results {
+		groupOrders[res.group] = res.ids
+	}
+
+	if err := g.Wait(); err != nil {
+		return GroupOrdersResult{}, err
+	}
+
+	// ---------- WARNING LOGIC ----------
+	warningIDs, err := s.GetWarningOrder(ctx, f)
+	if err != nil {
+		return GroupOrdersResult{}, err
+	}
+
+	// merge warning into group 7
+	idSet := make(map[int64]struct{})
+	for _, id := range groupOrders[StatusGroup7] {
+		idSet[id] = struct{}{}
+	}
+	for _, id := range warningIDs {
+		idSet[id] = struct{}{}
+	}
+
+	merged := make([]int64, 0, len(idSet))
+	for id := range idSet {
+		merged = append(merged, id)
+	}
+	groupOrders[StatusGroup7] = merged
+
+	// ---------- COUNTS ----------
+	groupCounts := make(map[StatusGroup]int, len(groupOrders))
+	for g, ids := range groupOrders {
+		groupCounts[g] = len(ids)
+	}
+
+	// ---------- SIGNAL ----------
+	ordersForSignal := map[StatusGroup][]int64{
+		StatusGroup0: groupOrders[StatusGroup0],
+		StatusGroup6: groupOrders[StatusGroup6],
+	}
+
+	return GroupOrdersResult{
+		GroupCounts:     groupCounts,
+		OrdersForSignal: ordersForSignal,
+	}, nil
 }

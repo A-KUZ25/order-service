@@ -20,7 +20,7 @@ import (
 func main() {
 	_ = godotenv.Load()
 
-	//todo нет защиты от sql инъекций
+	//todo нет защиты от sql инъекций в фильтре
 	mysqlDB, err := db.NewMySQL()
 	if err != nil {
 		log.Fatalf("mysql init error: %v", err)

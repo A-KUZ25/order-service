@@ -1,7 +1,5 @@
 package orderhttp
 
-import "orders-service/order"
-
 type OrderBaseRequest struct {
 	TenantID       int64   `json:"tenant_id"`
 	CityIDs        []int64 `json:"city_ids"`
@@ -15,39 +13,6 @@ type OrderBaseRequest struct {
 	SortOrder      string  `json:"sort_order"`
 }
 
-type UnpaidRequest struct {
-	OrderBaseRequest             //джсон сам мапиться в соответствии с полями
-	StatusCompletedNotPaid int64 `json:"status_completed_not_paid"`
-}
-
-type BadReviewRequest struct {
-	OrderBaseRequest
-	BadRatingMax int64 `json:"bad_rating_max"`
-}
-
-type ExceededPriceRequest struct {
-	OrderBaseRequest
-	MinRealPrice   float64 `json:"min_real_price"`
-	FinishedStatus []int64 `json:"finished_status"`
-}
-
-type WarningRequest struct {
-	OrderBaseRequest
-	WarningStatus          []int64 `json:"warning_status"`
-	StatusCompletedNotPaid int64   `json:"status_completed_not_paid"`
-	BadRatingMax           int64   `json:"bad_rating_max"`
-	MinRealPrice           float64 `json:"min_real_price"`
-	FinishedStatus         []int64 `json:"finished_status"`
-}
-
-type WarningPaginatedRequest struct {
-	OrderBaseRequest
-	WarningOrderIDs []int64 `json:"warning_order_ids"`
-
-	Page     int `json:"page"`
-	PageSize int `json:"page_size"`
-}
-
 type WarningFullRequest struct {
 	OrderBaseRequest
 	WarningStatus          []int64 `json:"warning_status"`
@@ -58,31 +23,4 @@ type WarningFullRequest struct {
 	Page                   int     `json:"page"`
 	PageSize               int     `json:"page_size"`
 	Group                  string  `json:"group"`
-}
-
-type UnpaidResponse struct {
-	UnpaidIDs []int64 `json:"unpaid_order_ids"`
-}
-
-type BadReviewResponse struct {
-	BadReviewIDs []int64 `json:"bad_review_ids"`
-}
-
-type ExceededPriceResponse struct {
-	PriceIDs []int64 `json:"price_ids"`
-}
-
-type WarningResponse struct {
-	WarningOrderIDs []int64 `json:"warning_order_ids"`
-}
-
-type WarningPaginatedResponse struct {
-	TotalCount int64             `json:"total_count"`
-	Orders     []order.FullOrder `json:"orders"`
-}
-
-type WarningFullResponse struct {
-	WarningOrderIDs []int64           `json:"warning_order_ids"`
-	TotalCount      int64             `json:"total_count"`
-	Orders          []order.FullOrder `json:"orders"`
 }
