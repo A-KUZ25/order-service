@@ -4,8 +4,9 @@ import (
 	"context"
 	"log"
 	"sort"
-	"sync"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 )
 
 type SortOrder string
@@ -63,11 +64,7 @@ type Repository interface {
 }
 
 type Service interface {
-	GetUnpaid(ctx context.Context, f UnpaidFilter) ([]int64, error)
-	GetBadReview(ctx context.Context, f BadReviewFilter) ([]int64, error)
-	GetExceededPrice(ctx context.Context, f ExceededPriceFilter) ([]int64, error)
 	GetWarningOrder(ctx context.Context, f WarningFilter) ([]int64, error)
-	GetWarningFull(ctx context.Context, f WarningFilter, page, pageSize int) (WarningGroupResult, error)
 	GetOrdersByGroup(ctx context.Context, f WarningFilter, page, pageSize int) (int64, []FullOrder, error)
 }
 
@@ -87,178 +84,101 @@ func NewService(repo Repository) Service {
 	}
 }
 
-func (s *service) GetUnpaid(ctx context.Context, filter UnpaidFilter) ([]int64, error) {
-	return s.repo.FetchUnpaid(ctx, filter)
-}
-
-func (s *service) GetBadReview(
-	ctx context.Context, filter BadReviewFilter,
-) ([]int64, error) {
-	return s.repo.FetchBadReview(ctx, filter)
-}
-
-func (s *service) GetExceededPrice(
-	ctx context.Context,
-	filter ExceededPriceFilter,
-) ([]int64, error) {
-	return s.repo.FetchExceededPrice(ctx, filter)
-}
-
 func (s *service) GetWarningOrder(ctx context.Context, f WarningFilter) ([]int64, error) {
 
-	type result struct {
-		ids []int64
-		err error
-	}
+	g, ctx := errgroup.WithContext(ctx)
 
-	chStatus := make(chan result, 1)
-	chUnpaid := make(chan result, 1)
-	chBad := make(chan result, 1)
-	chReal := make(chan result, 1)
+	var (
+		statusIDs []int64
+		unpaidIDs []int64
+		badIDs    []int64
+		realIDs   []int64
+	)
 
 	// 1) warning statuses
-	go func() {
+	g.Go(func() error {
 		ids, err := s.repo.FetchWarningStatus(ctx, f)
-		chStatus <- result{ids, err}
-	}()
+		if err != nil {
+			return err
+		}
+		statusIDs = ids
+		return nil
+	})
 
 	// 2) unpaid
-	go func() {
+	g.Go(func() error {
 		ids, err := s.repo.FetchUnpaid(ctx, UnpaidFilter{
 			BaseFilter:             f.BaseFilter,
 			StatusCompletedNotPaid: f.StatusCompletedNotPaid,
 		})
-		chUnpaid <- result{ids, err}
-	}()
+		if err != nil {
+			return err
+		}
+		unpaidIDs = ids
+		return nil
+	})
 
 	// 3) bad reviews
-	go func() {
+	g.Go(func() error {
 		ids, err := s.repo.FetchBadReview(ctx, BadReviewFilter{
 			BaseFilter:   f.BaseFilter,
 			BadRatingMax: f.BadRatingMax,
 		})
-		chBad <- result{ids, err}
-	}()
+		if err != nil {
+			return err
+		}
+		badIDs = ids
+		return nil
+	})
 
 	// 4) real > predv
-	go func() {
+	g.Go(func() error {
 		ids, err := s.repo.FetchExceededPrice(ctx, ExceededPriceFilter{
 			BaseFilter:     f.BaseFilter,
 			MinRealPrice:   f.MinRealPrice,
 			FinishedStatus: f.FinishedStatus,
 		})
-		chReal <- result{ids, err}
-	}()
+		if err != nil {
+			return err
+		}
+		realIDs = ids
+		return nil
+	})
 
-	resStatus := <-chStatus
-	resUnpaid := <-chUnpaid
-	resBad := <-chBad
-	resReal := <-chReal
-
-	if resStatus.err != nil {
-		return nil, resStatus.err
-	}
-	if resUnpaid.err != nil {
-		return nil, resUnpaid.err
-	}
-	if resBad.err != nil {
-		return nil, resBad.err
-	}
-	if resReal.err != nil {
-		return nil, resReal.err
+	// Ждём завершения всех горутин
+	if err := g.Wait(); err != nil {
+		return nil, err
 	}
 
-	// Объединяем уникальные ID
-	idSet := make(map[int64]struct{}, len(resStatus.ids)+len(resUnpaid.ids)+len(resBad.ids)+len(resReal.ids))
+	// ---------- ОБЪЕДИНЕНИЕ РЕЗУЛЬТАТОВ ----------
 
-	for _, id := range resStatus.ids {
-		idSet[id] = struct{}{}
-	}
-	for _, id := range resUnpaid.ids {
-		idSet[id] = struct{}{}
-	}
-	for _, id := range resBad.ids {
-		idSet[id] = struct{}{}
-	}
-	for _, id := range resReal.ids {
-		idSet[id] = struct{}{}
-	}
-
-	resultIDs := make([]int64, 0, len(idSet))
-	for id := range idSet {
-		resultIDs = append(resultIDs, id)
-	}
-
-	sort.Slice(resultIDs, func(i, j int) bool { return resultIDs[i] < resultIDs[j] })
-
-	return resultIDs, nil
-}
-
-func (s *service) GetWarningFull(
-	ctx context.Context,
-	f WarningFilter,
-	page, pageSize int,
-) (WarningGroupResult, error) {
-
-	start := time.Now()
-
-	// 1) warning IDs — сначала (внутри у тебя уже 4 параллельных SQL)
-	warningIDs, err := s.GetWarningOrder(ctx, f)
-	if err != nil {
-		return WarningGroupResult{}, err
-	}
-
-	// 2) параллельно считаем COUNT и PAGINATED
-	var (
-		cnt    int64
-		orders []FullOrder
+	idSet := make(map[int64]struct{},
+		len(statusIDs)+len(unpaidIDs)+len(badIDs)+len(realIDs),
 	)
 
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	errCh := make(chan error, 2)
-
-	// COUNT goroutine
-	go func() {
-		defer wg.Done()
-
-		c, err := s.repo.CountOrdersWithWarning(ctx, f.BaseFilter, warningIDs)
-		if err != nil {
-			errCh <- err
-			return
-		}
-		cnt = c
-	}()
-
-	// PAGINATED goroutine
-	go func() {
-		defer wg.Done()
-
-		ords, err := s.repo.FetchOrdersWithWarning(ctx, f.BaseFilter, warningIDs, page, pageSize)
-		if err != nil {
-			errCh <- err
-			return
-		}
-		orders = ords
-	}()
-
-	wg.Wait()
-	close(errCh)
-
-	for e := range errCh {
-		if e != nil {
-			return WarningGroupResult{}, e
-		}
+	for _, id := range statusIDs {
+		idSet[id] = struct{}{}
+	}
+	for _, id := range unpaidIDs {
+		idSet[id] = struct{}{}
+	}
+	for _, id := range badIDs {
+		idSet[id] = struct{}{}
+	}
+	for _, id := range realIDs {
+		idSet[id] = struct{}{}
 	}
 
-	log.Println("Execution took:", time.Since(start))
+	result := make([]int64, 0, len(idSet))
+	for id := range idSet {
+		result = append(result, id)
+	}
 
-	return WarningGroupResult{
-		WarningOrderIDs: warningIDs,
-		TotalCount:      cnt,
-		Orders:          orders,
-	}, nil
+	sort.Slice(result, func(i, j int) bool {
+		return result[i] < result[j]
+	})
+
+	return result, nil
 }
 
 func (s *service) GetOrdersByGroup(
@@ -270,36 +190,66 @@ func (s *service) GetOrdersByGroup(
 	var (
 		ordersCount     int64
 		ordersPaginated []FullOrder
-		err             error
 	)
 	start := time.Now()
 	// Если это "warning" группа — нужно учитывать warningOrderIDs (OR o.order_id IN (...))
 	// В PHP: для STATUS_GROUP_7 -> if empty(warningOrderIds) ? count() : orFilterWhere(...)->count()
 	if f.BaseFilter.Group == "warning" {
 		warningOrderIDs, err := s.GetWarningOrder(ctx, f)
+		if err != nil {
+			return 0, nil, err
+		}
 		// Если warningOrderIDs пуст — это просто обычный подсчёт/пагинация по baseFilter
 		// В противном случае используем их как дополнительный OR (CountOrdersWithWarning / FetchOrdersWithWarning реализуют это).
-		ordersCount, err = s.repo.CountOrdersWithWarning(ctx, f.BaseFilter, warningOrderIDs)
-		if err != nil {
+
+		g, ctx := errgroup.WithContext(ctx)
+
+		g.Go(func() error {
+			cnt, err := s.repo.CountOrdersWithWarning(ctx, f.BaseFilter, warningOrderIDs)
+			if err != nil {
+				return err
+			}
+			ordersCount = cnt
+			return nil
+		})
+
+		g.Go(func() error {
+			ords, err := s.repo.FetchOrdersWithWarning(ctx, f.BaseFilter, warningOrderIDs, page, pageSize)
+			if err != nil {
+				return err
+			}
+			ordersPaginated = ords
+			return nil
+		})
+
+		if err := g.Wait(); err != nil {
 			return 0, nil, err
 		}
 
-		ordersPaginated, err = s.repo.FetchOrdersWithWarning(ctx, f.BaseFilter, warningOrderIDs, page, pageSize)
-		if err != nil {
-			return 0, nil, err
-		}
 		log.Println("Execution took:", time.Since(start))
 		return ordersCount, ordersPaginated, nil
 	}
+	g, ctx := errgroup.WithContext(ctx)
 
-	// default case: обычная группа — считаем и берем страницы только по baseFilter (warningOrderIDs игнорируем)
-	ordersCount, err = s.repo.CountOrdersWithWarning(ctx, f.BaseFilter, nil)
-	if err != nil {
-		return 0, nil, err
-	}
+	g.Go(func() error {
+		cnt, err := s.repo.CountOrdersWithWarning(ctx, f.BaseFilter, nil)
+		if err != nil {
+			return err
+		}
+		ordersCount = cnt
+		return nil
+	})
 
-	ordersPaginated, err = s.repo.FetchOrdersWithWarning(ctx, f.BaseFilter, nil, page, pageSize)
-	if err != nil {
+	g.Go(func() error {
+		ords, err := s.repo.FetchOrdersWithWarning(ctx, f.BaseFilter, nil, page, pageSize)
+		if err != nil {
+			return err
+		}
+		ordersPaginated = ords
+		return nil
+	})
+
+	if err := g.Wait(); err != nil {
 		return 0, nil, err
 	}
 	log.Println("Execution took:", time.Since(start))
