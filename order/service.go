@@ -2,9 +2,9 @@ package order
 
 import (
 	"context"
-	"errors"
 	"log"
 	"sort"
+	"sync"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -307,83 +307,45 @@ func (s *service) GetOrdersForTabs(
 	ctx context.Context,
 	f WarningFilter,
 ) (GroupOrdersResult, error) {
-
-	type groupResult struct {
-		group StatusGroup
-		ids   []int64
-	}
-
-	g, ctx := errgroup.WithContext(ctx)
-
-	results := make(chan groupResult, 4)
-
-	statusIDs, ok := orderGroupIds[StatusGroup(f.BaseFilter.Group)]
-	if !ok {
-		return GroupOrdersResult{}, errors.New("unknown status group")
-	}
-
-	// ---------- GROUP 0 ----------
-	g.Go(func() error {
-		ids, err := s.repo.FetchOrdersByStatusGroup(ctx, f.BaseFilter, statusIDs)
-		if err != nil {
-			return err
-		}
-		results <- groupResult{StatusGroup0, ids}
-		return nil
-	})
-
-	// ---------- GROUP 6 ----------
-	g.Go(func() error {
-		ids, err := s.repo.FetchOrdersByStatusGroup(ctx, f.BaseFilter, statusIDs)
-		if err != nil {
-			return err
-		}
-		results <- groupResult{StatusGroup6, ids}
-		return nil
-	})
-
-	// ---------- GROUP 7 (base, без warning расширения) ----------
-	g.Go(func() error {
-		ids, err := s.repo.FetchOrdersByStatusGroup(ctx, f.BaseFilter, statusIDs)
-		if err != nil {
-			return err
-		}
-		results <- groupResult{StatusGroup7, ids}
-		return nil
-	})
-
-	// ---------- GROUP 8 ----------
-	g.Go(func() error {
-		ids, err := s.repo.FetchOrdersByStatusGroup(ctx, f.BaseFilter, statusIDs)
-		if err != nil {
-			return err
-		}
-		results <- groupResult{StatusGroup8, ids}
-		return nil
-	})
-
-	go func() {
-		_ = g.Wait()
-		close(results)
-	}()
-
+	// ---------- ЭТАП 1: базовые группы ----------
 	groupOrders := make(map[StatusGroup][]int64, 4)
+	var mu sync.Mutex
 
-	for res := range results {
-		groupOrders[res.group] = res.ids
+	g, groupCtx := errgroup.WithContext(ctx)
+
+	for group, statusIDs := range orderGroupIds {
+		group := group
+		statusIDs := statusIDs
+		f.BaseFilter.Status = statusIDs
+		g.Go(func() error {
+			ids, err := s.repo.FetchOrdersByStatusGroup(
+				groupCtx,
+				f.BaseFilter,
+				statusIDs,
+			)
+			if err != nil {
+				return err
+			}
+
+			mu.Lock()
+			groupOrders[group] = ids
+			mu.Unlock()
+
+			return nil
+		})
 	}
 
 	if err := g.Wait(); err != nil {
 		return GroupOrdersResult{}, err
 	}
 
-	// ---------- WARNING LOGIC ----------
+	// ---------- ЭТАП 2: WARNING (НОВЫЙ КОНТЕКСТ) ----------
 	warningIDs, err := s.GetWarningOrder(ctx, f)
 	if err != nil {
 		return GroupOrdersResult{}, err
 	}
 
-	// merge warning into group 7
+	// merge warning → group 7
 	idSet := make(map[int64]struct{})
 	for _, id := range groupOrders[StatusGroup7] {
 		idSet[id] = struct{}{}

@@ -613,7 +613,7 @@ WHERE (1=1
 `)
 
 	// базовые фильтры (tenant, city, date, tariffs, positions, status_time)
-	r.buildBaseQuery(&sb, &args, f)
+	r.buildBaseQuery(&sb, &args, f, true)
 	sb.WriteString(") ")
 
 	// group statuses
