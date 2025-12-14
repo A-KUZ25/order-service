@@ -19,6 +19,7 @@ type BaseFilter struct {
 	Date           *string
 	StatusTimeFrom *int64
 	StatusTimeTo   *int64
+	SelectForDate  bool
 	Tariffs        []int64
 	UserPositions  []int64
 	Group          string
@@ -74,7 +75,6 @@ type Repository interface {
 	FetchOrdersByStatusGroup(
 		ctx context.Context,
 		f BaseFilter,
-		statusIDs []int64,
 	) ([]int64, error)
 }
 
@@ -316,12 +316,18 @@ func (s *service) GetOrdersForTabs(
 	for group, statusIDs := range orderGroupIds {
 		group := group
 		statusIDs := statusIDs
-		f.BaseFilter.Status = statusIDs
+
+		bf := f.BaseFilter
+		bf.Status = statusIDs
+		if group == StatusGroup7 {
+			bf.SelectForDate = true
+		} else {
+			bf.SelectForDate = false
+		}
 		g.Go(func() error {
 			ids, err := s.repo.FetchOrdersByStatusGroup(
 				groupCtx,
-				f.BaseFilter,
-				statusIDs,
+				bf,
 			)
 			if err != nil {
 				return err
@@ -340,6 +346,7 @@ func (s *service) GetOrdersForTabs(
 	}
 
 	// ---------- ЭТАП 2: WARNING (НОВЫЙ КОНТЕКСТ) ----------
+	f.BaseFilter.SelectForDate = true
 	warningIDs, err := s.GetWarningOrder(ctx, f)
 	if err != nil {
 		return GroupOrdersResult{}, err

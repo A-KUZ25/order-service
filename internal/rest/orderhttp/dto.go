@@ -6,6 +6,7 @@ type OrderBaseRequest struct {
 	Date           *string `json:"date"`
 	StatusTimeFrom *int64  `json:"status_time_from"`
 	StatusTimeTo   *int64  `json:"status_time_to"`
+	SelectForDate  bool    `json:"select_for_date"`
 	Status         []int64 `json:"status"`
 	Tariffs        []int64 `json:"tariffs"`
 	UserPositions  []int64 `json:"user_positions"`

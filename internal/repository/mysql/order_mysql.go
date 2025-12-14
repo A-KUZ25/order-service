@@ -30,7 +30,7 @@ func (r *OrdersRepository) buildBaseQuery(sb *strings.Builder, args *[]any, f or
 	sb.WriteString(" AND o.active = 1 ")
 
 	// date
-	if f.StatusTimeFrom != nil && f.StatusTimeTo != nil {
+	if f.SelectForDate && f.StatusTimeFrom != nil && f.StatusTimeTo != nil {
 		sb.WriteString("  AND o.status_time BETWEEN ? AND ?\n")
 		*args = append(*args, *f.StatusTimeFrom, *f.StatusTimeTo)
 	}
@@ -600,7 +600,6 @@ func formatQuery(sqlStr string, args []any) string {
 func (r *OrdersRepository) FetchOrdersByStatusGroup(
 	ctx context.Context,
 	f order.BaseFilter,
-	statusIDs []int64,
 ) ([]int64, error) {
 
 	var sb strings.Builder
@@ -617,9 +616,9 @@ WHERE (1=1
 	sb.WriteString(") ")
 
 	// group statuses
-	if len(statusIDs) > 0 {
+	if len(f.Status) > 0 {
 		sb.WriteString(" AND o.status_id IN (")
-		for i, st := range statusIDs {
+		for i, st := range f.Status {
 			if i > 0 {
 				sb.WriteString(",")
 			}
@@ -628,7 +627,7 @@ WHERE (1=1
 		}
 		sb.WriteString(")\n")
 	}
-
+	log.Println(formatQuery(sb.String(), args))
 	r.appendOrderBy(&sb, f)
 
 	return r.executeQuery(ctx, sb.String(), args)
