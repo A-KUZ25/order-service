@@ -627,7 +627,7 @@ WHERE (1=1
 		}
 		sb.WriteString(")\n")
 	}
-	log.Println(formatQuery(sb.String(), args))
+
 	r.appendOrderBy(&sb, f)
 
 	return r.executeQuery(ctx, sb.String(), args)
