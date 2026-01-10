@@ -61,7 +61,7 @@ func (h *Handler) OrdersByGroup(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	count, orders, err := h.service.GetOrdersByGroup(ctx, f, page, pageSize)
+	count, orders, err := h.service.GetFormattedOrdersByGroup(ctx, f, page, pageSize)
 	if err != nil {
 		http.Error(w, "internal error: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -69,10 +69,10 @@ func (h *Handler) OrdersByGroup(w http.ResponseWriter, r *http.Request) {
 
 	// Формируем ответ (пример структуры)
 	resp := struct {
-		TotalCount int64             `json:"total_count"`
-		Orders     []order.FullOrder `json:"orders"`
-		Page       int               `json:"page"`
-		PageSize   int               `json:"page_size"`
+		TotalCount int64                  `json:"total_count"`
+		Orders     []order.FormattedOrder `json:"orders"`
+		Page       int                    `json:"page"`
+		PageSize   int                    `json:"page_size"`
 	}{
 		TotalCount: count,
 		Orders:     orders,

@@ -115,3 +115,197 @@ type FullOrder struct {
 	CurrencyCode   sql.NullString
 	CurrencySymbol sql.NullString
 }
+
+type FormattedOrder struct {
+	// ===== БАЗОВЫЕ ПОЛЯ =====
+	OrderID      int64  `json:"order_id"`
+	TenantID     int64  `json:"tenant_id"`
+	WorkerID     *int64 `json:"worker_id"`
+	CarID        *int64 `json:"car_id"`
+	CityID       int64  `json:"city_id"`
+	TariffID     int64  `json:"tariff_id"`
+	UserCreate   int64  `json:"user_create"`
+	StatusID     int64  `json:"status_id"`
+	UserModified int64  `json:"user_modifed"`
+	CompanyID    *int64 `json:"company_id"`
+	ParkingID    *int64 `json:"parking_id"`
+
+	Address any     `json:"address"`
+	Comment *string `json:"comment"`
+
+	PredvPrice           float64 `json:"predv_price"`
+	PredvPriceNoDiscount float64 `json:"predv_price_no_discount"`
+
+	Device                     string   `json:"device"`
+	OrderNumber                int64    `json:"order_number"`
+	Payment                    string   `json:"payment"`
+	ShowPhone                  int64    `json:"show_phone"`
+	CreateTime                 int64    `json:"create_time"`
+	StatusTime                 int64    `json:"status_time"`
+	TimeToClient               *int64   `json:"time_to_client"`
+	ClientDeviceToken          *string  `json:"client_device_token"`
+	AppID                      *int64   `json:"app_id"`
+	OrderTime                  int64    `json:"order_time"`
+	PredvDistance              float64  `json:"predv_distance"`
+	PredvTime                  int64    `json:"predv_time"`
+	CallWarningID              *int64   `json:"call_warning_id"`
+	Phone                      string   `json:"phone"`
+	ClientID                   int64    `json:"client_id"`
+	BonusPayment               int64    `json:"bonus_payment"`
+	CurrencyID                 int64    `json:"currency_id"`
+	TimeOffset                 int64    `json:"time_offset"`
+	IsFix                      int64    `json:"is_fix"`
+	UpdateTime                 int64    `json:"update_time"`
+	DenyRefuseOrder            int64    `json:"deny_refuse_order"`
+	PositionID                 int64    `json:"position_id"`
+	PromoCodeID                *int64   `json:"promo_code_id"`
+	TenantCompanyID            *int64   `json:"tenant_company_id"`
+	Mark                       int64    `json:"mark"`
+	ProcessedExchangeProgramID *int64   `json:"processed_exchange_program_id"`
+	ClientPassengerID          *int64   `json:"client_passenger_id"`
+	ClientPassengerPhone       *string  `json:"client_passenger_phone"`
+	Active                     int64    `json:"active"`
+	IsPreOrder                 int64    `json:"is_pre_order"`
+	AppVersion                 *string  `json:"app_version"`
+	AgentCommission            float64  `json:"agent_commission"`
+	IsFixByDispatcher          int64    `json:"is_fix_by_dispatcher"`
+	FinishTime                 *int64   `json:"finish_time"`
+	CommentForDispatcher       *string  `json:"comment_for_dispatcher"`
+	WorkerManualSurcharge      float64  `json:"worker_manual_surcharge"`
+	RealtimePrice              *float64 `json:"realtime_price"`
+	UnitQuantity               *float64 `json:"unit_quantity"`
+	ShopID                     *int64   `json:"shop_id"`
+	RequirePrepayment          int64    `json:"require_prepayment"`
+	OrderCode                  string   `json:"order_code"`
+	ClientOfferedPrice         *float64 `json:"client_offered_price"`
+	IdempotentKey              string   `json:"idempotent_key"`
+	AdditionalTariffID         *int64   `json:"additional_tariff_id"`
+	InitialPrice               *float64 `json:"initial_price"`
+	TimeToOrder                *int64   `json:"time_to_order"`
+	Sort                       *int64   `json:"sort"`
+	SummaryCost                *string  `json:"summary_cost"`
+	SummaryCostNoDiscount      *string  `json:"summary_cost_no_discount"`
+
+	// ===== ДУБЛИ СТАТУСА =====
+	StatusStatusID int64  `json:"status_status_id"`
+	StatusName     string `json:"status_name"`
+
+	// ===== ДАННЫЕ СВЯЗЕЙ =====
+	Callsign    *int64  `json:"callsign"`
+	WName       *string `json:"wName"`
+	WLastName   *string `json:"wLastName"`
+	WSecondName *string `json:"wSecondName"`
+	WPhone      *string `json:"wPhone"`
+
+	CPhone      *string `json:"cPhone"`
+	CName       *string `json:"cName"`
+	CLastName   *string `json:"cLastName"`
+	CSecondName *string `json:"cSecondName"`
+
+	CarName      *string `json:"car_name"`
+	CarColor     *string `json:"car_color"`
+	CarGosNumber *string `json:"car_gos_number"`
+
+	TariffType        string  `json:"tariff_type"`
+	TName             string  `json:"tName"`
+	QuantitativeTitle string  `json:"quantitative_title"`
+	PriceForUnit      float64 `json:"price_for_unit"`
+	UnitName          string  `json:"unit_name"`
+
+	UserID      int64   `json:"user_id"`
+	UName       string  `json:"uName"`
+	ULastName   string  `json:"uLastName"`
+	USecondName *string `json:"uSecondName"`
+
+	CurrencyName string `json:"currency_name"`
+	CurrencyCode string `json:"currency_code"`
+	Symbol       string `json:"symbol"`
+
+	// ===== ВЛОЖЕННЫЕ DTO =====
+	Status      StatusDTO   `json:"status"`
+	Client      ClientDTO   `json:"client"`
+	UserCreated UserDTO     `json:"userCreated"`
+	Worker      WorkerDTO   `json:"worker"`
+	Car         CarDTO      `json:"car"`
+	Tariff      TariffDTO   `json:"tariff"`
+	Options     []OptionDTO `json:"options"`
+	Currency    CurrencyDTO `json:"currency"`
+}
+
+type StatusDTO struct {
+	StatusID int64  `json:"status_id"`
+	Name     string `json:"name"`
+}
+
+type ClientDTO struct {
+	ClientID   int64   `json:"client_id"`
+	Phone      *string `json:"phone"`
+	Name       *string `json:"name"`
+	LastName   *string `json:"last_name"`
+	SecondName *string `json:"second_name"`
+}
+
+type UserDTO struct {
+	UserID     int64   `json:"user_id"`
+	Name       string  `json:"name"`
+	LastName   string  `json:"last_name"`
+	SecondName *string `json:"second_name"`
+}
+
+type WorkerDTO struct {
+	WorkerID   int64   `json:"worker_id"`
+	Callsign   *int64  `json:"callsign"`
+	Name       *string `json:"name"`
+	LastName   *string `json:"last_name"`
+	SecondName *string `json:"second_name"`
+	Phone      *string `json:"phone"`
+}
+
+type CarDTO struct {
+	CarID     int64   `json:"car_id"`
+	Name      *string `json:"name"`
+	Color     *int64  `json:"color"`
+	GosNumber *string `json:"gos_number"`
+}
+
+type TariffDTO struct {
+	TariffID          int64   `json:"tariff_id"`
+	TariffType        string  `json:"tariff_type"`
+	Name              string  `json:"name"`
+	QuantitativeTitle string  `json:"quantitative_title"`
+	PriceForUnit      float64 `json:"price_for_unit"`
+	UnitName          string  `json:"unit_name"`
+}
+
+type CurrencyDTO struct {
+	Name   string `json:"name"`
+	Code   string `json:"code"`
+	Symbol string `json:"symbol"`
+}
+
+type OptionDTO struct {
+	OptionID int64  `json:"option_id"`
+	Name     string `json:"name"`
+	Quantity int64  `json:"quantity"`
+}
+
+func nullableInt64(v sql.NullInt64) *int64 {
+	if !v.Valid {
+		return nil
+	}
+	return &v.Int64
+}
+
+func nullableString(v sql.NullString) *string {
+	if !v.Valid {
+		return nil
+	}
+	return &v.String
+}
+
+func nullableFloat64(v sql.NullFloat64) *float64 {
+	if !v.Valid {
+		return nil
+	}
+	return &v.Float64
+}
