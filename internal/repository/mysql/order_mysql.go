@@ -644,7 +644,6 @@ func (r *OrdersRepository) GetOptionsForOrders(
 		return result, nil
 	}
 
-	// 1️⃣ Генерируем IN (?, ?, ?)
 	placeholders := make([]string, 0, len(orderIDs))
 	args := make([]any, 0, len(orderIDs))
 
@@ -664,11 +663,12 @@ func (r *OrdersRepository) GetOptionsForOrders(
 		       ON co.option_id = oho.option_id
 		WHERE oho.order_id IN (` + strings.Join(placeholders, ",") + `)
 	`
-
+	start := time.Now()
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
+	log.Println("BASE REQUEST TIME:", time.Since(start))
 	defer rows.Close()
 
 	for rows.Next() {
@@ -697,6 +697,60 @@ func (r *OrdersRepository) GetOptionsForOrders(
 
 	if err := rows.Err(); err != nil {
 		return nil, err
+	}
+
+	return result, nil
+}
+
+func (r *OrdersRepository) GetStatusChangeTimes(
+	ctx context.Context,
+	keys []order.StatusKey,
+) (map[order.StatusKey]int64, error) {
+
+	if len(keys) == 0 {
+		return map[order.StatusKey]int64{}, nil
+	}
+
+	var (
+		args   []any
+		values []string
+	)
+
+	for _, k := range keys {
+		values = append(values, "(?, ?)")
+		args = append(args, k.OrderID, k.StatusID)
+	}
+
+	query := `
+		SELECT order_id, change_val AS status_id, change_time
+		FROM tbl_order_change_data
+		WHERE change_field = 'status_id'
+		  AND (order_id, change_val) IN (` + strings.Join(values, ",") + `)
+	`
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[order.StatusKey]int64, len(keys))
+
+	for rows.Next() {
+		var (
+			orderID  int64
+			statusID int64
+			timeVal  int64
+		)
+
+		if err := rows.Scan(&orderID, &statusID, &timeVal); err != nil {
+			return nil, err
+		}
+
+		result[order.StatusKey{
+			OrderID:  orderID,
+			StatusID: statusID,
+		}] = timeVal
 	}
 
 	return result, nil

@@ -2,7 +2,9 @@ package orderhttp
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
+	"time"
 
 	"orders-service/order"
 )
@@ -19,7 +21,7 @@ func NewHandler(service order.Service) *Handler {
 
 func (h *Handler) OrdersByGroup(w http.ResponseWriter, r *http.Request) {
 	var req WarningFullRequest
-
+	start := time.Now()
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -66,26 +68,31 @@ func (h *Handler) OrdersByGroup(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-
+	preparedOrder, err := h.service.PrepareOrdersData(ctx, orders, f)
+	if err != nil {
+		http.Error(w, "internal error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 	// Формируем ответ (пример структуры)
 	resp := struct {
-		TotalCount int64                  `json:"total_count"`
-		Orders     []order.FormattedOrder `json:"orders"`
-		Page       int                    `json:"page"`
-		PageSize   int                    `json:"page_size"`
+		TotalCount int64                 `json:"total_count"`
+		Orders     []order.PreparedOrder `json:"orders"`
+		Page       int                   `json:"page"`
+		PageSize   int                   `json:"page_size"`
 	}{
 		TotalCount: count,
-		Orders:     orders,
+		Orders:     preparedOrder,
 		Page:       page,
 		PageSize:   pageSize,
 	}
+	log.Println("Execution OrdersByGroup took:", time.Since(start))
 
 	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *Handler) OrderForTabs(w http.ResponseWriter, r *http.Request) {
 	var req WarningFullRequest
-
+	start := time.Now()
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -128,7 +135,7 @@ func (h *Handler) OrderForTabs(w http.ResponseWriter, r *http.Request) {
 		OrderCounts:     result.GroupCounts,
 		OrdersForSignal: result.OrdersForSignal,
 	}
-
+	log.Println("Execution OrderForTabs took:", time.Since(start))
 	writeJSON(w, http.StatusOK, resp)
 
 }

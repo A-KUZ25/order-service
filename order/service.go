@@ -3,7 +3,6 @@ package order
 import (
 	"context"
 	"fmt"
-	"log"
 	"sort"
 	"strconv"
 	"sync"
@@ -83,6 +82,10 @@ type Repository interface {
 		ctx context.Context,
 		orderIDs []int64,
 	) (map[int64][]OptionDTO, error)
+	GetStatusChangeTimes(
+		ctx context.Context,
+		keys []StatusKey,
+	) (map[StatusKey]int64, error)
 }
 
 type Service interface {
@@ -96,6 +99,11 @@ type Service interface {
 		ctx context.Context,
 		f WarningFilter,
 	) (GroupOrdersResult, error)
+	PrepareOrdersData(
+		ctx context.Context,
+		orders []FormattedOrder,
+		f WarningFilter,
+	) ([]PreparedOrder, error)
 }
 
 type WarningGroupResult struct {
@@ -211,7 +219,7 @@ func (s *service) GetOrdersByGroup(
 		ordersCount     int64
 		ordersPaginated []FullOrder
 	)
-	start := time.Now()
+
 	// Если это "warning" группа — нужно учитывать warningOrderIDs (OR o.order_id IN (...))
 	// В PHP: для STATUS_GROUP_7 -> if empty(warningOrderIds) ? count() : orFilterWhere(...)->count()
 	if f.BaseFilter.Group == "warning" {
@@ -247,7 +255,6 @@ func (s *service) GetOrdersByGroup(
 			return 0, nil, err
 		}
 
-		log.Println("Execution took:", time.Since(start))
 		return ordersCount, ordersPaginated, nil
 	}
 	g, ctx := errgroup.WithContext(ctx)
@@ -273,7 +280,7 @@ func (s *service) GetOrdersByGroup(
 	if err := g.Wait(); err != nil {
 		return 0, nil, err
 	}
-	log.Println("Execution took:", time.Since(start))
+
 	return ordersCount, ordersPaginated, nil
 }
 
@@ -621,13 +628,13 @@ func unserializePHP(data string) any {
 		return nil
 	}
 
-	var result any
-	err := phpserialize.Unmarshal([]byte(data), &result)
+	var raw map[interface{}]interface{}
+	err := phpserialize.Unmarshal([]byte(data), &raw)
 	if err != nil {
 		return nil
 	}
 
-	return normalizePHPValue(result)
+	return normalizePHPValue(raw)
 }
 
 func normalizePHPValue(v any) any {
@@ -661,4 +668,382 @@ func toString(v any) string {
 	default:
 		return fmt.Sprint(k)
 	}
+}
+
+func (s *service) PrepareOrdersData(
+	ctx context.Context,
+	orders []FormattedOrder,
+	f WarningFilter,
+) ([]PreparedOrder, error) {
+
+	result := make([]PreparedOrder, 0, len(orders))
+	seen := make(map[int64]struct{}, len(orders))
+
+	statusChangeTimes, err := s.loadStatusChangeTimes(ctx, orders)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, o := range orders {
+
+		// ===== 1. ДЕДУПЛИКАЦИЯ =====
+		if _, ok := seen[o.OrderID]; ok {
+			continue
+		}
+		seen[o.OrderID] = struct{}{}
+
+		// ===== 2. КАТЕГОРИЯ СТАТУСА =====
+		category := GetCategory(o.StatusID)
+
+		// ===== 3. DEVICE NAME =====
+		deviceName := GetDeviceName(o.Device)
+
+		// ===== 4. STATUS TIME =====
+		statusTime := s.GetTimeOrderStatusChanged(
+			o.OrderID,
+			o.StatusID,
+			o.StatusTime,
+			statusChangeTimes,
+		)
+
+		// ===== 5. WAIT TIME =====
+		waitTime := GetWorkerWaitingTime(o.TenantID, o.OrderID)
+
+		// ===== 6. ADDRESS =====
+		addresses := BuildAddress(o.Address)
+
+		// ===== 7. SUMMARY COST =====
+		summaryCost := any(o.PredvPrice)
+		if o.PredvPriceNoDiscount > 0 {
+			summaryCost = o.PredvPriceNoDiscount
+		}
+
+		if f.BaseFilter.Group == "completed" {
+			switch {
+			case o.SummaryCostNoDiscount != nil:
+				summaryCost = *o.SummaryCostNoDiscount
+			case o.SummaryCost != nil:
+				summaryCost = *o.SummaryCost
+			}
+		}
+
+		// ===== 8. ORDER NUMBER =====
+		orderNumber := ShowCodeOrID(
+			o.OrderCode,
+			o.OrderNumber,
+		)
+
+		// ===== 9. RESULT =====
+		prepared := PreparedOrder{
+			ID:             o.OrderID,
+			OrderNumber:    orderNumber,
+			OrderIDForSort: o.OrderNumber,
+			//todo Как подтягивать переводы? o.Status.Name
+			Status: StatusOut{
+				StatusID: o.Status.StatusID,
+				Name:     o.Status.Name,
+				Category: category,
+				Color:    GetColor(o.StatusID),
+			},
+			DateForSort: time.Unix(o.OrderTime, 0).UTC().Format("2006-01-02 15:04:05"),
+			Date:        time.Unix(o.OrderTime, 0).UTC().Format("02.01.06 15:04"),
+			Address:     addresses,
+			CityID:      o.CityID,
+			Phone:       o.Phone,
+			Device:      o.Device,
+			DeviceName:  deviceName,
+			Client: ClientOut{
+				ClientID: o.Client.ClientID,
+				Phone:    o.Client.Phone,
+				Name:     o.Client.Name,
+				LastName: o.Client.LastName,
+			},
+			Dispatcher:   BuildDispatcher(o),
+			Worker:       BuildWorker(o),
+			Car:          BuildCar(o),
+			Tariff:       BuildTariff(o),
+			Options:      o.Options,
+			Comment:      o.Comment,
+			SummaryCost:  summaryCost,
+			StatusTime:   statusTime,
+			TimeToClient: o.TimeToClient,
+			WaitTime:     waitTime,
+			CreateTime:   o.CreateTime,
+			OrderTime:    o.OrderTime - o.TimeOffset,
+			PositionID:   o.PositionID,
+			UnitQuantity: o.UnitQuantity,
+		}
+
+		result = append(result, prepared)
+	}
+
+	return result, nil
+}
+
+func (s *service) loadStatusChangeTimes(
+	ctx context.Context,
+	orders []FormattedOrder,
+) (map[StatusKey]int64, error) {
+
+	keysMap := make(map[StatusKey]struct{}, len(orders))
+
+	for _, o := range orders {
+		keysMap[StatusKey{
+			OrderID:  o.OrderID,
+			StatusID: o.StatusID,
+		}] = struct{}{}
+	}
+
+	keys := make([]StatusKey, 0, len(keysMap))
+	for k := range keysMap {
+		keys = append(keys, k)
+	}
+
+	return s.repo.GetStatusChangeTimes(ctx, keys)
+}
+
+func toSet(values []int64) map[int64]struct{} {
+	set := make(map[int64]struct{}, len(values))
+	for _, v := range values {
+		set[v] = struct{}{}
+	}
+	return set
+}
+
+var categories = []struct {
+	Name     string
+	Statuses map[int64]struct{}
+}{
+	{
+		Name: "new",
+		Statuses: toSet([]int64{
+			1, 2, 3, 4, 5, 52, 108, 109, 115, 127, 128, 130, 131, 136,
+		}),
+	},
+	{
+		Name: "works",
+		Statuses: toSet([]int64{
+			17, 26, 27, 29, 30, 36, 54, 55, 106, 110, 113, 114, 132, 133, 134, 135,
+		}),
+	},
+	{
+		Name: "warning",
+		Statuses: toSet([]int64{
+			5, 16, 27, 30, 38, 45, 46, 47, 48, 52, 54, 129,
+		}),
+	},
+	{
+		Name: "pre_order",
+		Statuses: toSet([]int64{
+			6, 7, 16, 111, 112, 116, 117, 118, 119,
+		}),
+	},
+	{
+		Name: "completed",
+		Statuses: toSet([]int64{
+			37, 38,
+		}),
+	},
+	{
+		Name: "rejected",
+		Statuses: toSet([]int64{
+			39, 40, 41, 42, 43, 44, 45, 46, 47, 48,
+			49, 50, 51, 107, 120, 121, 122, 123, 124, 125, 126,
+		}),
+	},
+}
+
+func GetCategory(statusID int64) string {
+	for _, c := range categories {
+		if _, ok := c.Statuses[statusID]; ok {
+			return c.Name
+		}
+	}
+	return ""
+}
+
+const (
+	DeviceDispatcher = "DISPATCHER"
+	DeviceIOS        = "IOS"
+	DeviceAndroid    = "ANDROID"
+	DeviceWorker     = "WORKER"
+	DeviceCabinet    = "CABINET"
+	DeviceWeb        = "WEB"
+)
+
+func GetDeviceName(device string) string {
+	switch device {
+	case DeviceDispatcher:
+		return "Диспетчер"
+	case DeviceIOS:
+		return "IOS"
+	case DeviceAndroid:
+		return "Android"
+	case DeviceWorker:
+		return "Борт"
+	case DeviceCabinet:
+		return "Кабинет"
+	case DeviceWeb:
+		return "Web site"
+	default:
+		return ""
+	}
+}
+
+func (s *service) GetTimeOrderStatusChanged(
+	orderID int64,
+	statusID int64,
+	statusTime int64,
+	statusChangeTimes map[StatusKey]int64,
+) int64 {
+
+	key := StatusKey{
+		OrderID:  orderID,
+		StatusID: statusID,
+	}
+
+	if t, ok := statusChangeTimes[key]; ok {
+		return t
+	}
+
+	return statusTime
+}
+
+func GetWorkerWaitingTime(tenantID, orderID int64) int64 {
+	// TODO: реализовать после переноса логики ожидания водителя
+	return 0
+}
+
+func BuildAddress(raw any) []AddressOut {
+	result := make([]AddressOut, 0)
+
+	addressMap, ok := raw.(map[string]any)
+	if !ok {
+		return result
+	}
+
+	for _, v := range addressMap {
+		item, ok := v.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		addr := AddressOut{
+			ID:      getString(item["city_id"]),
+			City:    getString(item["city"]),
+			Street:  getString(item["street"]),
+			Label:   getString(item["label"]),
+			House:   getString(item["house"]),
+			Apt:     getString(item["apt"]),
+			Parking: getString(item["parking"]),
+			Type:    "house",
+		}
+
+		if item["place_id"] != nil {
+			addr.Type = "place"
+		}
+
+		result = append(result, addr)
+	}
+
+	return result
+}
+
+func getString(v any) string {
+	if v == nil {
+		return ""
+	}
+	return v.(string)
+}
+
+func ShowCodeOrID(orderCode string, orderNumber int64) any {
+	//todo подумать о выносе настроек
+	//if showCode {
+	//	if orderCode != "" {
+	//		return orderCode
+	//	}
+	//	return orderNumber
+	//}
+	//return orderNumber
+
+	if orderCode != "" {
+		return orderCode
+	}
+	return orderNumber
+}
+
+var redStatuses = map[int64]struct{}{
+	10: {}, 16: {}, 27: {}, 30: {}, 38: {},
+	39: {}, 52: {}, 54: {}, 117: {}, 118: {},
+	120: {}, 135: {},
+}
+
+func GetColor(statusID int64) string {
+	if _, ok := redStatuses[statusID]; ok {
+		return "#cc1919"
+	}
+	return "#088142"
+}
+
+func BuildDispatcher(o FormattedOrder) any {
+	if o.Device == DeviceDispatcher {
+		return map[string]any{
+			"device": "Диспетчер",
+			"user": map[string]any{
+				"userId":     o.UserCreated.UserID,
+				"name":       o.UserCreated.Name,
+				"lastName":   o.UserCreated.LastName,
+				"secondName": o.UserCreated.SecondName,
+			},
+		}
+	}
+
+	return map[string]any{
+		"device": GetDeviceName(o.Device),
+	}
+}
+
+func BuildWorker(o FormattedOrder) *WorkerOut {
+	if o.WorkerID == nil {
+		return nil
+	}
+
+	name := ""
+	if o.Worker.LastName != nil && o.Worker.Name != nil {
+		name = *o.Worker.LastName + " " + string([]rune(*o.Worker.Name)[0]) + "."
+	}
+
+	return &WorkerOut{
+		WorkerID: o.Worker.WorkerID,
+		Callsign: o.Worker.Callsign,
+		Name:     name,
+		Phone:    o.Worker.Phone,
+	}
+}
+func BuildCar(o FormattedOrder) *CarOut {
+	if o.CarID == nil {
+		return nil
+	}
+
+	return &CarOut{
+		CarID:  o.Car.CarID,
+		Name:   o.Car.Name,
+		Color:  o.Car.Color,
+		Number: o.Car.GosNumber,
+	}
+}
+
+func BuildTariff(o FormattedOrder) TariffOut {
+	t := TariffOut{
+		TariffID: o.Tariff.TariffID,
+		Name:     o.Tariff.Name,
+	}
+
+	if o.Tariff.TariffType == "QUANTITATIVE" {
+		t.QuantitativeTitle = &o.Tariff.QuantitativeTitle
+		t.PriceForUnit = &o.Tariff.PriceForUnit
+		t.UnitName = &o.Tariff.UnitName
+	}
+
+	return t
 }
