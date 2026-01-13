@@ -3,7 +3,6 @@ package order
 import (
 	"context"
 	"fmt"
-	"log"
 	"sort"
 	"strconv"
 	"sync"
@@ -592,7 +591,6 @@ func (s *service) GetFormattedOrdersByGroup(
 	}
 
 	// 2 Собираем orderIDs и Address (аналог PHP unserialize)
-	start := time.Now()
 
 	orderIDs := make([]int64, len(orders))
 	addressMap := make(map[int64]any, len(orders))
@@ -607,8 +605,6 @@ func (s *service) GetFormattedOrdersByGroup(
 			addressMap[o.OrderID] = nil
 		}
 	}
-
-	log.Println("PHP TIME:", time.Since(start))
 
 	// 3 Options одним запросом
 	optionsMap, err := s.repo.GetOptionsForOrders(ctx, orderIDs)
@@ -626,7 +622,6 @@ func (s *service) GetFormattedOrdersByGroup(
 	return count, formatted, nil
 }
 
-// todo можно кешировать между запросами одна из самых дорогих операций
 func unserializePHP(data string) any {
 	if data == "" {
 		return nil
