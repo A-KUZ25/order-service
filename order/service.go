@@ -594,7 +594,7 @@ func (s *service) GetFormattedOrdersByGroup(
 	// 2 Собираем orderIDs и Address (аналог PHP unserialize)
 	start := time.Now()
 
-	orderIDs := make([]int64, 0, len(orders))
+	orderIDs := make([]int64, len(orders))
 	addressMap := make(map[int64]any, len(orders))
 	//todo паралельно?
 	for i := range orders {
