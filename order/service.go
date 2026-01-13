@@ -3,7 +3,6 @@ package order
 import (
 	"context"
 	"fmt"
-	"log"
 	"sort"
 	"strconv"
 	"sync"
@@ -592,7 +591,6 @@ func (s *service) GetFormattedOrdersByGroup(
 	}
 
 	// 2 Собираем orderIDs и Address (аналог PHP unserialize)
-	start2 := time.Now()
 	orderIDs := make([]int64, len(orders))
 	addressMap := make(map[int64]any, len(orders))
 	//todo паралельно?
@@ -606,9 +604,7 @@ func (s *service) GetFormattedOrdersByGroup(
 			addressMap[o.OrderID] = nil
 		}
 	}
-	log.Println("order TIME:", time.Since(start2))
 
-	start2 = time.Now()
 	// 3 Options одним запросом
 	optionsMap, err := s.repo.GetOptionsForOrders(ctx, orderIDs)
 	if err != nil {
@@ -621,7 +617,6 @@ func (s *service) GetFormattedOrdersByGroup(
 		optionsMap,
 		addressMap,
 	)
-	log.Println("option TIME:", time.Since(start2))
 
 	return count, formatted, nil
 }
