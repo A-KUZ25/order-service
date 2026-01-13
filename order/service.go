@@ -3,6 +3,7 @@ package order
 import (
 	"context"
 	"fmt"
+	"log"
 	"sort"
 	"strconv"
 	"sync"
@@ -604,6 +605,7 @@ func (s *service) GetFormattedOrdersByGroup(
 
 	// 4 Address (аналог PHP unserialize)
 	//todo паралельно?
+	start := time.Now()
 	addressMap := make(map[int64]any, len(orders))
 	for _, o := range orders {
 		if o.Address != "" {
@@ -612,8 +614,9 @@ func (s *service) GetFormattedOrdersByGroup(
 			addressMap[o.OrderID] = nil
 		}
 	}
+	log.Println("PHP TIME:", time.Since(start))
 
-	// 5 МАППЕР 🔥
+	// 5 МАППЕР
 	formatted := s.MapOrders(
 		orders,
 		optionsMap,
@@ -623,6 +626,7 @@ func (s *service) GetFormattedOrdersByGroup(
 	return count, formatted, nil
 }
 
+// todo можно кешировать между запросами одна из самых дорогих операций
 func unserializePHP(data string) any {
 	if data == "" {
 		return nil
@@ -910,7 +914,7 @@ func (s *service) GetTimeOrderStatusChanged(
 }
 
 func GetWorkerWaitingTime(tenantID, orderID int64) int64 {
-	// TODO: реализовать после переноса логики ожидания водителя
+	// TODO: реализовать после переноса логики
 	return 0
 }
 
