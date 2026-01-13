@@ -63,16 +63,20 @@ func (h *Handler) OrdersByGroup(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
+	start2 := time.Now()
 	count, orders, err := h.service.GetFormattedOrdersByGroup(ctx, f, page, pageSize)
 	if err != nil {
 		http.Error(w, "internal error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	log.Println("formated TIME:", time.Since(start2))
+	start2 = time.Now()
 	preparedOrder, err := h.service.PrepareOrdersData(ctx, orders, f)
 	if err != nil {
 		http.Error(w, "internal error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	log.Println("prepared TIME:", time.Since(start2))
 	// Формируем ответ (пример структуры)
 	resp := struct {
 		TotalCount int64                 `json:"total_count"`
