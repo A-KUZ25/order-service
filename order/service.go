@@ -591,11 +591,24 @@ func (s *service) GetFormattedOrdersByGroup(
 		return count, []FormattedOrder{}, nil
 	}
 
-	// 2 Собираем orderIDs
+	// 2 Собираем orderIDs и Address (аналог PHP unserialize)
+	start := time.Now()
+
 	orderIDs := make([]int64, 0, len(orders))
-	for _, o := range orders {
-		orderIDs = append(orderIDs, o.OrderID)
+	addressMap := make(map[int64]any, len(orders))
+	//todo паралельно?
+	for i := range orders {
+		o := orders[i]
+		orderIDs[i] = o.OrderID
+
+		if o.Address != "" {
+			addressMap[o.OrderID] = unserializePHP(o.Address)
+		} else {
+			addressMap[o.OrderID] = nil
+		}
 	}
+
+	log.Println("PHP TIME:", time.Since(start))
 
 	// 3 Options одним запросом
 	optionsMap, err := s.repo.GetOptionsForOrders(ctx, orderIDs)
@@ -603,20 +616,7 @@ func (s *service) GetFormattedOrdersByGroup(
 		return 0, nil, err
 	}
 
-	// 4 Address (аналог PHP unserialize)
-	//todo паралельно?
-	start := time.Now()
-	addressMap := make(map[int64]any, len(orders))
-	for _, o := range orders {
-		if o.Address != "" {
-			addressMap[o.OrderID] = unserializePHP(o.Address)
-		} else {
-			addressMap[o.OrderID] = nil
-		}
-	}
-	log.Println("PHP TIME:", time.Since(start))
-
-	// 5 МАППЕР
+	// 4 МАППЕР
 	formatted := s.MapOrders(
 		orders,
 		optionsMap,
