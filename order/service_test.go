@@ -27,11 +27,6 @@ func (m *MockRepository) FetchExceededPrice(ctx context.Context, f ExceededPrice
 	return args.Get(0).([]int64), args.Error(1)
 }
 
-func (m *MockRepository) FetchWarningStatus(ctx context.Context, f WarningFilter) ([]int64, error) {
-	args := m.Called(ctx, f)
-	return args.Get(0).([]int64), args.Error(1)
-}
-
 func (m *MockRepository) CountOrdersWithWarning(
 	ctx context.Context,
 	f BaseFilter,
@@ -58,6 +53,22 @@ func (m *MockRepository) FetchOrdersByStatusGroup(
 ) ([]int64, error) {
 	args := m.Called(ctx, f)
 	return args.Get(0).([]int64), args.Error(1)
+}
+
+func (m *MockRepository) GetOptionsForOrders(
+	ctx context.Context,
+	orderIDs []int64,
+) (map[int64][]OptionDTO, error) {
+	args := m.Called(ctx, orderIDs)
+	return args.Get(0).(map[int64][]OptionDTO), args.Error(1)
+}
+
+func (m *MockRepository) GetStatusChangeTimes(
+	ctx context.Context,
+	keys []StatusKey,
+) (map[StatusKey]int64, error) {
+	args := m.Called(ctx, keys)
+	return args.Get(0).(map[StatusKey]int64), args.Error(1)
 }
 
 type testService struct {
@@ -134,7 +145,6 @@ func TestGetOrdersByGroup_Warning_FullMock(t *testing.T) {
 		mock.AnythingOfType("order.UnpaidFilter"),
 	).Return([]int64{6, 7}, nil)
 
-	// 2) bad reviews
 	repo.On(
 		"FetchBadReview",
 		mock.Anything,

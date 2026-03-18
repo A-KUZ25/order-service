@@ -2,13 +2,11 @@ package order
 
 import (
 	"context"
-	"fmt"
 	"sort"
 	"strconv"
 	"sync"
 	"time"
 
-	"github.com/elliotchance/phpserialize"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -17,6 +15,7 @@ type SortOrder string
 type BaseFilter struct {
 	TenantID       int64
 	CityIDs        []int64
+	Language       string
 	Status         []int64
 	Date           *string
 	StatusTimeFrom *int64
@@ -62,7 +61,6 @@ type Repository interface {
 	FetchUnpaid(ctx context.Context, filter UnpaidFilter) ([]int64, error)
 	FetchBadReview(ctx context.Context, f BadReviewFilter) ([]int64, error)
 	FetchExceededPrice(ctx context.Context, f ExceededPriceFilter) ([]int64, error)
-	FetchWarningStatus(ctx context.Context, f WarningFilter) ([]int64, error)
 	CountOrdersWithWarning(
 		ctx context.Context,
 		f BaseFilter,
@@ -86,6 +84,21 @@ type Repository interface {
 		ctx context.Context,
 		keys []StatusKey,
 	) (map[StatusKey]int64, error)
+}
+
+type AddressParser interface {
+	ParseAddress(raw string) ([]AddressOut, error)
+}
+
+type WaitingTimeProvider interface {
+	GetWorkerWaitingTime(
+		ctx context.Context,
+		tenantID, orderID int64,
+	) (int64, error)
+}
+
+type StatusTranslator interface {
+	TranslateStatus(ctx context.Context, language, name string) (string, error)
 }
 
 type Service interface {
@@ -113,12 +126,23 @@ type WarningGroupResult struct {
 }
 
 type service struct {
-	repo Repository
+	repo                Repository
+	addressParser       AddressParser
+	waitingTimeProvider WaitingTimeProvider
+	statusTranslator    StatusTranslator
 }
 
-func NewService(repo Repository) Service {
+func NewService(
+	repo Repository,
+	addressParser AddressParser,
+	waitingTimeProvider WaitingTimeProvider,
+	statusTranslator StatusTranslator,
+) Service {
 	return &service{
-		repo: repo,
+		repo:                repo,
+		addressParser:       addressParser,
+		waitingTimeProvider: waitingTimeProvider,
+		statusTranslator:    statusTranslator,
 	}
 }
 
@@ -127,7 +151,6 @@ func (s *service) GetWarningOrder(ctx context.Context, f WarningFilter) ([]int64
 	g, ctx := errgroup.WithContext(ctx)
 
 	var (
-		statusIDs []int64
 		unpaidIDs []int64
 		badIDs    []int64
 		realIDs   []int64
@@ -181,12 +204,8 @@ func (s *service) GetWarningOrder(ctx context.Context, f WarningFilter) ([]int64
 	// ---------- ОБЪЕДИНЕНИЕ РЕЗУЛЬТАТОВ ----------
 
 	idSet := make(map[int64]struct{},
-		len(statusIDs)+len(unpaidIDs)+len(badIDs)+len(realIDs),
+		len(unpaidIDs)+len(badIDs)+len(realIDs),
 	)
-
-	for _, id := range statusIDs {
-		idSet[id] = struct{}{}
-	}
 	for _, id := range unpaidIDs {
 		idSet[id] = struct{}{}
 	}
@@ -401,7 +420,7 @@ func (s *service) GetOrdersForTabs(
 func (s *service) MapFullOrderToFormatted(
 	o FullOrder,
 	options []OptionDTO,
-	address any,
+	address []AddressOut,
 ) FormattedOrder {
 
 	// predv_price логика 1-в-1 с PHP
@@ -558,7 +577,7 @@ func parseFloat(v string) float64 {
 func (s *service) MapOrders(
 	orders []FullOrder,
 	optionsMap map[int64][]OptionDTO,
-	addressMap map[int64]any,
+	addressMap map[int64][]AddressOut,
 ) []FormattedOrder {
 
 	result := make([]FormattedOrder, 0, len(orders))
@@ -592,14 +611,17 @@ func (s *service) GetFormattedOrdersByGroup(
 
 	// 2 Собираем orderIDs и Address (аналог PHP unserialize)
 	orderIDs := make([]int64, len(orders))
-	addressMap := make(map[int64]any, len(orders))
-	//todo паралельно?
+	addressMap := make(map[int64][]AddressOut, len(orders))
 	for i := range orders {
 		o := orders[i]
 		orderIDs[i] = o.OrderID
 
 		if o.Address != "" {
-			addressMap[o.OrderID] = unserializePHP(o.Address)
+			addresses, err := s.parseAddress(o.Address)
+			if err != nil {
+				return 0, nil, err
+			}
+			addressMap[o.OrderID] = addresses
 		} else {
 			addressMap[o.OrderID] = nil
 		}
@@ -619,53 +641,6 @@ func (s *service) GetFormattedOrdersByGroup(
 	)
 
 	return count, formatted, nil
-}
-
-func unserializePHP(data string) any {
-	if data == "" {
-		return nil
-	}
-
-	var raw map[interface{}]interface{}
-	err := phpserialize.Unmarshal([]byte(data), &raw)
-	if err != nil {
-		return nil
-	}
-
-	return normalizePHPValue(raw)
-}
-
-func normalizePHPValue(v any) any {
-	switch val := v.(type) {
-
-	case map[interface{}]interface{}:
-		m := make(map[string]any, len(val))
-		for k, v2 := range val {
-			m[toString(k)] = normalizePHPValue(v2)
-		}
-		return m
-
-	case []interface{}:
-		arr := make([]any, 0, len(val))
-		for _, v2 := range val {
-			arr = append(arr, normalizePHPValue(v2))
-		}
-		return arr
-
-	default:
-		return val
-	}
-}
-
-func toString(v any) string {
-	switch k := v.(type) {
-	case string:
-		return k
-	case []byte:
-		return string(k)
-	default:
-		return fmt.Sprint(k)
-	}
 }
 
 func (s *service) PrepareOrdersData(
@@ -696,6 +671,11 @@ func (s *service) PrepareOrdersData(
 		// ===== 3. DEVICE NAME =====
 		deviceName := GetDeviceName(o.Device)
 
+		translatedStatusName, err := s.translateStatus(ctx, f.BaseFilter.Language, o.Status.Name)
+		if err != nil {
+			return nil, err
+		}
+
 		// ===== 4. STATUS TIME =====
 		statusTime := s.GetTimeOrderStatusChanged(
 			o.OrderID,
@@ -705,10 +685,13 @@ func (s *service) PrepareOrdersData(
 		)
 
 		// ===== 5. WAIT TIME =====
-		waitTime := GetWorkerWaitingTime(o.TenantID, o.OrderID)
+		waitTime, err := s.getWorkerWaitingTime(ctx, o.TenantID, o.OrderID)
+		if err != nil {
+			return nil, err
+		}
 
 		// ===== 6. ADDRESS =====
-		addresses := BuildAddress(o.Address)
+		addresses := o.Address
 
 		// ===== 7. SUMMARY COST =====
 		summaryCost := any(o.PredvPrice)
@@ -736,10 +719,9 @@ func (s *service) PrepareOrdersData(
 			ID:             o.OrderID,
 			OrderNumber:    orderNumber,
 			OrderIDForSort: o.OrderNumber,
-			//todo Как подтягивать переводы? o.Status.Name
 			Status: StatusOut{
 				StatusID: o.Status.StatusID,
-				Name:     o.Status.Name,
+				Name:     translatedStatusName,
 				Category: category,
 				Color:    GetColor(o.StatusID),
 			},
@@ -907,51 +889,43 @@ func (s *service) GetTimeOrderStatusChanged(
 	return statusTime
 }
 
-func GetWorkerWaitingTime(tenantID, orderID int64) int64 {
-	// TODO: реализовать после переноса логики
-	return 0
+func (s *service) parseAddress(raw string) ([]AddressOut, error) {
+	if raw == "" || s.addressParser == nil {
+		return nil, nil
+	}
+
+	return s.addressParser.ParseAddress(raw)
 }
 
-func BuildAddress(raw any) []AddressOut {
-	result := make([]AddressOut, 0)
-
-	addressMap, ok := raw.(map[string]any)
-	if !ok {
-		return result
+func (s *service) getWorkerWaitingTime(
+	ctx context.Context,
+	tenantID, orderID int64,
+) (int64, error) {
+	if s.waitingTimeProvider == nil {
+		return 0, nil
 	}
 
-	for _, v := range addressMap {
-		item, ok := v.(map[string]any)
-		if !ok {
-			continue
-		}
-
-		addr := AddressOut{
-			ID:      getString(item["city_id"]),
-			City:    getString(item["city"]),
-			Street:  getString(item["street"]),
-			Label:   getString(item["label"]),
-			House:   getString(item["house"]),
-			Apt:     getString(item["apt"]),
-			Parking: getString(item["parking"]),
-			Type:    "house",
-		}
-
-		if item["place_id"] != nil {
-			addr.Type = "place"
-		}
-
-		result = append(result, addr)
-	}
-
-	return result
+	return s.waitingTimeProvider.GetWorkerWaitingTime(ctx, tenantID, orderID)
 }
 
-func getString(v any) string {
-	if v == nil {
-		return ""
+func (s *service) translateStatus(
+	ctx context.Context,
+	language string,
+	name string,
+) (string, error) {
+	if s.statusTranslator == nil || name == "" {
+		return name, nil
 	}
-	return v.(string)
+
+	translated, err := s.statusTranslator.TranslateStatus(ctx, language, name)
+	if err != nil {
+		return "", err
+	}
+	if translated == "" {
+		return name, nil
+	}
+
+	return translated, nil
 }
 
 func ShowCodeOrID(orderCode string, orderNumber int64) any {

@@ -218,39 +218,6 @@ WHERE ( 1=1
 	return r.executeQuery(ctx, sb.String(), args)
 }
 
-func (r *OrdersRepository) FetchWarningStatus(
-	ctx context.Context,
-	f order.WarningFilter,
-) ([]int64, error) {
-
-	var sb strings.Builder
-	args := []any{}
-
-	sb.WriteString(`
-SELECT o.order_id
-FROM tbl_order o
-WHERE ( 1=1
-`)
-
-	r.buildBaseQuery(&sb, &args, f.BaseFilter, true)
-	sb.WriteString(") ")
-	if len(f.WarningStatus) > 0 {
-		sb.WriteString("  AND o.status_id IN (")
-		for i, st := range f.WarningStatus {
-			if i > 0 {
-				sb.WriteString(",")
-			}
-			sb.WriteString("?")
-			args = append(args, st)
-		}
-		sb.WriteString(")\n")
-	}
-
-	r.appendOrderBy(&sb, f.BaseFilter)
-
-	return r.executeQuery(ctx, sb.String(), args)
-}
-
 func (r *OrdersRepository) CountOrdersWithWarning(
 	ctx context.Context,
 	f order.BaseFilter,
@@ -566,35 +533,6 @@ func formatArg(a any) string {
 	default:
 		return fmt.Sprintf("%v", v)
 	}
-}
-
-// formatQuery заменяет "?" последовательно на отформатированные аргументы.
-// ВАЖНО: только для чтения/отладки — не использовать для исполнения.
-// Если args длиннее количества ? — оставляет оставшиеся args в конце.
-func formatQuery(sqlStr string, args []any) string {
-	var b strings.Builder
-	r := strings.NewReplacer("\n", " ", "\t", " ")
-	sqlStr = r.Replace(sqlStr)
-	// простая последовательная замена ? на форматArg
-	parts := strings.Split(sqlStr, "?")
-	for i, p := range parts {
-		b.WriteString(p)
-		if i < len(args) {
-			b.WriteString(formatArg(args[i]))
-		}
-	}
-	// если args больше чем ?, добавим их в конец (дебаг)
-	if len(args) > len(parts)-1 {
-		b.WriteString(" /* extra args: ")
-		for i := len(parts) - 1; i < len(args); i++ {
-			if i > len(parts)-1 {
-				b.WriteString(", ")
-			}
-			b.WriteString(formatArg(args[i]))
-		}
-		b.WriteString(" */")
-	}
-	return b.String()
 }
 
 func (r *OrdersRepository) FetchOrdersByStatusGroup(

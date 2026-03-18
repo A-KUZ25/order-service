@@ -5,7 +5,9 @@ import (
 	"log"
 	"net/http"
 	"orders-service/internal/db"
+	"orders-service/internal/legacy/address"
 	"orders-service/internal/repository/mysql"
+	"orders-service/internal/repository/redisactive"
 	"orders-service/internal/rest/orderhttp"
 	"orders-service/order"
 	"os"
@@ -34,11 +36,29 @@ func main() {
 		}
 	}()
 
+	redisClient, err := db.NewRedisActiveOrders()
+	if err != nil {
+		log.Fatalf("redis init error: %v", err)
+	}
+
+	defer func() {
+		if err := redisClient.Close(); err != nil {
+			log.Printf("error closing redis: %v", err)
+		} else {
+			log.Println("redis closed")
+		}
+	}()
+
 	repo, err := mysql.NewOrdersRepository(mysqlDB)
 	if err != nil {
 		log.Fatalf("Repository init error: %v", err)
 	}
-	service := order.NewService(repo)
+	service := order.NewService(
+		repo,
+		address.NewParser(),
+		redisactive.NewActiveOrdersRepository(redisClient),
+		mysql.NewStatusTranslator(mysqlDB, os.Getenv("APP_LANGUAGE")),
+	)
 	handler := orderhttp.NewHandler(service)
 
 	r := chi.NewRouter()
@@ -78,7 +98,6 @@ func main() {
 	defer cancel()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		// если graceful не удался, логируем и пробуем принудительно Close
 		log.Printf("graceful shutdown failed: %v", err)
 		if err := srv.Close(); err != nil {
 			log.Printf("server close failed: %v", err)

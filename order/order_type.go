@@ -130,8 +130,8 @@ type FormattedOrder struct {
 	CompanyID    *int64 `json:"company_id"`
 	ParkingID    *int64 `json:"parking_id"`
 
-	Address any     `json:"address"`
-	Comment *string `json:"comment"`
+	Address []AddressOut `json:"address"`
+	Comment *string      `json:"comment"`
 
 	PredvPrice           float64 `json:"predv_price"`
 	PredvPriceNoDiscount float64 `json:"predv_price_no_discount"`
@@ -353,14 +353,14 @@ type ClientOut struct {
 }
 
 type AddressOut struct {
-	ID      string `json:"id"`
-	City    string `json:"city"`
-	Street  string `json:"street"`
-	Label   string `json:"label"`
-	House   string `json:"house"`
-	Apt     string `json:"apt"`
-	Parking string `json:"parking"`
-	Type    string `json:"type"`
+	ID      *string `json:"id"`
+	City    *string `json:"city"`
+	Street  *string `json:"street"`
+	Label   *string `json:"label"`
+	House   *string `json:"house"`
+	Apt     *string `json:"apt"`
+	Parking *string `json:"parking"`
+	Type    string  `json:"type"`
 }
 
 type WorkerOut struct {

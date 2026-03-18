@@ -3,6 +3,7 @@ package orderhttp
 type OrderBaseRequest struct {
 	TenantID       int64   `json:"tenant_id"`
 	CityIDs        []int64 `json:"city_ids"`
+	Language       string  `json:"language"`
 	Date           *string `json:"date"`
 	StatusTimeFrom *int64  `json:"status_time_from"`
 	StatusTimeTo   *int64  `json:"status_time_to"`

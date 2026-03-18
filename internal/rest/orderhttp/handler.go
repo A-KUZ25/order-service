@@ -21,127 +21,129 @@ func NewHandler(service order.Service) *Handler {
 	}
 }
 
-func (h *Handler) OrdersByGroup(w http.ResponseWriter, r *http.Request) {
-	var req WarningFullRequest
-	start := time.Now()
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-
-	base := order.BaseFilter{
-		TenantID:       req.TenantID,
-		CityIDs:        req.CityIDs,
-		Date:           req.Date,
-		StatusTimeFrom: req.StatusTimeFrom,
-		StatusTimeTo:   req.StatusTimeTo,
-		SelectForDate:  req.SelectForDate,
-		Tariffs:        req.Tariffs,
-		UserPositions:  req.UserPositions,
-		SortField:      req.SortField,
-		SortOrder:      req.SortOrder,
-		Status:         req.Status,
-		Group:          req.Group,
-	}
-
-	f := order.WarningFilter{
-		BaseFilter:             base,
-		WarningStatus:          req.WarningStatus,
-		FinishedStatus:         req.FinishedStatus,
-		BadRatingMax:           req.BadRatingMax,
-		StatusCompletedNotPaid: req.StatusCompletedNotPaid,
-		MinRealPrice:           req.MinRealPrice,
-	}
-
-	page := req.Page
-	if page < 0 {
-		page = 0
-	}
-
-	pageSize := req.PageSize
-	if pageSize <= 0 {
-		pageSize = 50
-	}
-
-	ctx := r.Context()
-
-	count, orders, err := h.service.GetFormattedOrdersByGroup(ctx, f, page, pageSize)
-	if err != nil {
-		http.Error(w, "internal error: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	preparedOrder, err := h.service.PrepareOrdersData(ctx, orders, f)
-	if err != nil {
-		http.Error(w, "internal error: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	// Формируем ответ (пример структуры)
-	resp := struct {
-		TotalCount int64                 `json:"total_count"`
-		Orders     []order.PreparedOrder `json:"orders"`
-		Page       int                   `json:"page"`
-		PageSize   int                   `json:"page_size"`
-	}{
-		TotalCount: count,
-		Orders:     preparedOrder,
-		Page:       page,
-		PageSize:   pageSize,
-	}
-	log.Println("Execution OrdersByGroup took:", time.Since(start))
-
-	writeJSON(w, http.StatusOK, resp)
-}
-
-func (h *Handler) OrderForTabs(w http.ResponseWriter, r *http.Request) {
-	var req WarningFullRequest
-	start := time.Now()
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-
-	base := order.BaseFilter{
-		TenantID:       req.TenantID,
-		CityIDs:        req.CityIDs,
-		Date:           req.Date,
-		StatusTimeFrom: req.StatusTimeFrom,
-		StatusTimeTo:   req.StatusTimeTo,
-		SelectForDate:  req.SelectForDate,
-		Tariffs:        req.Tariffs,
-		UserPositions:  req.UserPositions,
-		SortField:      req.SortField,
-		SortOrder:      req.SortOrder,
-		Status:         req.Status,
-		Group:          req.Group,
-	}
-
-	f := order.WarningFilter{
-		BaseFilter:             base,
-		WarningStatus:          req.WarningStatus,
-		FinishedStatus:         req.FinishedStatus,
-		BadRatingMax:           req.BadRatingMax,
-		StatusCompletedNotPaid: req.StatusCompletedNotPaid,
-		MinRealPrice:           req.MinRealPrice,
-	}
-	ctx := r.Context()
-	result, err := h.service.GetOrdersForTabs(ctx, f)
-	if err != nil {
-		http.Error(w, "internal error: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	resp := struct {
-		OrderCounts     map[order.StatusGroup]int     `json:"order_counts"`
-		OrdersForSignal map[order.StatusGroup][]int64 `json:"orders_for_signal"`
-	}{
-		OrderCounts:     result.GroupCounts,
-		OrdersForSignal: result.OrdersForSignal,
-	}
-	log.Println("Execution OrderForTabs took:", time.Since(start))
-	writeJSON(w, http.StatusOK, resp)
-
-}
+//func (h *Handler) OrdersByGroup(w http.ResponseWriter, r *http.Request) {
+//	var req WarningFullRequest
+//	start := time.Now()
+//	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+//		writeError(w, http.StatusBadRequest, err)
+//		return
+//	}
+//
+//	base := order.BaseFilter{
+//		TenantID:       req.TenantID,
+//		CityIDs:        req.CityIDs,
+//		Language:       req.Language,
+//		Date:           req.Date,
+//		StatusTimeFrom: req.StatusTimeFrom,
+//		StatusTimeTo:   req.StatusTimeTo,
+//		SelectForDate:  req.SelectForDate,
+//		Tariffs:        req.Tariffs,
+//		UserPositions:  req.UserPositions,
+//		SortField:      req.SortField,
+//		SortOrder:      req.SortOrder,
+//		Status:         req.Status,
+//		Group:          req.Group,
+//	}
+//
+//	f := order.WarningFilter{
+//		BaseFilter:             base,
+//		WarningStatus:          req.WarningStatus,
+//		FinishedStatus:         req.FinishedStatus,
+//		BadRatingMax:           req.BadRatingMax,
+//		StatusCompletedNotPaid: req.StatusCompletedNotPaid,
+//		MinRealPrice:           req.MinRealPrice,
+//	}
+//
+//	page := req.Page
+//	if page < 0 {
+//		page = 0
+//	}
+//
+//	pageSize := req.PageSize
+//	if pageSize <= 0 {
+//		pageSize = 50
+//	}
+//
+//	ctx := r.Context()
+//
+//	count, orders, err := h.service.GetFormattedOrdersByGroup(ctx, f, page, pageSize)
+//	if err != nil {
+//		http.Error(w, "internal error: "+err.Error(), http.StatusInternalServerError)
+//		return
+//	}
+//
+//	preparedOrder, err := h.service.PrepareOrdersData(ctx, orders, f)
+//	if err != nil {
+//		http.Error(w, "internal error: "+err.Error(), http.StatusInternalServerError)
+//		return
+//	}
+//	// Формируем ответ (пример структуры)
+//	resp := struct {
+//		TotalCount int64                 `json:"total_count"`
+//		Orders     []order.PreparedOrder `json:"orders"`
+//		Page       int                   `json:"page"`
+//		PageSize   int                   `json:"page_size"`
+//	}{
+//		TotalCount: count,
+//		Orders:     preparedOrder,
+//		Page:       page,
+//		PageSize:   pageSize,
+//	}
+//	log.Println("Execution OrdersByGroup took:", time.Since(start))
+//
+//	writeJSON(w, http.StatusOK, resp)
+//}
+//
+//func (h *Handler) OrderForTabs(w http.ResponseWriter, r *http.Request) {
+//	var req WarningFullRequest
+//	start := time.Now()
+//	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+//		writeError(w, http.StatusBadRequest, err)
+//		return
+//	}
+//
+//	base := order.BaseFilter{
+//		TenantID:       req.TenantID,
+//		CityIDs:        req.CityIDs,
+//		Language:       req.Language,
+//		Date:           req.Date,
+//		StatusTimeFrom: req.StatusTimeFrom,
+//		StatusTimeTo:   req.StatusTimeTo,
+//		SelectForDate:  req.SelectForDate,
+//		Tariffs:        req.Tariffs,
+//		UserPositions:  req.UserPositions,
+//		SortField:      req.SortField,
+//		SortOrder:      req.SortOrder,
+//		Status:         req.Status,
+//		Group:          req.Group,
+//	}
+//
+//	f := order.WarningFilter{
+//		BaseFilter:             base,
+//		WarningStatus:          req.WarningStatus,
+//		FinishedStatus:         req.FinishedStatus,
+//		BadRatingMax:           req.BadRatingMax,
+//		StatusCompletedNotPaid: req.StatusCompletedNotPaid,
+//		MinRealPrice:           req.MinRealPrice,
+//	}
+//	ctx := r.Context()
+//	result, err := h.service.GetOrdersForTabs(ctx, f)
+//	if err != nil {
+//		http.Error(w, "internal error: "+err.Error(), http.StatusInternalServerError)
+//		return
+//	}
+//
+//	resp := struct {
+//		OrderCounts     map[order.StatusGroup]int     `json:"order_counts"`
+//		OrdersForSignal map[order.StatusGroup][]int64 `json:"orders_for_signal"`
+//	}{
+//		OrderCounts:     result.GroupCounts,
+//		OrdersForSignal: result.OrdersForSignal,
+//	}
+//	log.Println("Execution OrderForTabs took:", time.Since(start))
+//	writeJSON(w, http.StatusOK, resp)
+//
+//}
 
 type ordersResponse struct {
 	OrderTotalCount int64                         `json:"orderTotalCount"`
@@ -238,6 +240,7 @@ func buildWarningFilter(req WarningFullRequest) order.WarningFilter {
 	base := order.BaseFilter{
 		TenantID:       req.TenantID,
 		CityIDs:        req.CityIDs,
+		Language:       req.Language,
 		Date:           req.Date,
 		StatusTimeFrom: req.StatusTimeFrom,
 		StatusTimeTo:   req.StatusTimeTo,
