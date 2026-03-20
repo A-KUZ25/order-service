@@ -57,7 +57,8 @@ func main() {
 		repo,
 		address.NewParser(),
 		redisactive.NewActiveOrdersRepository(redisClient),
-		mysql.NewStatusTranslator(mysqlDB, os.Getenv("APP_LANGUAGE")),
+		mysql.NewStatusTranslator(mysqlDB),
+		mysql.NewShowOrderCodeProvider(mysqlDB),
 	)
 	handler := orderhttp.NewHandler(service)
 

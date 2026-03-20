@@ -13,14 +13,10 @@ type StatusTranslator struct {
 	cache           sync.Map
 }
 
-func NewStatusTranslator(db *sql.DB, defaultLanguage string) *StatusTranslator {
-	if defaultLanguage == "" {
-		defaultLanguage = "ru"
-	}
-
+func NewStatusTranslator(db *sql.DB) *StatusTranslator {
 	return &StatusTranslator{
 		db:              db,
-		defaultLanguage: defaultLanguage,
+		defaultLanguage: "en-US",
 	}
 }
 
@@ -74,6 +70,7 @@ LIMIT 1
 	return translated, true, nil
 }
 
+// todo разобраться
 func (t *StatusTranslator) languageCandidates(language string) []string {
 	if language == "" {
 		language = t.defaultLanguage

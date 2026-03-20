@@ -101,6 +101,13 @@ type StatusTranslator interface {
 	TranslateStatus(ctx context.Context, language, name string) (string, error)
 }
 
+type ShowOrderCodeProvider interface {
+	ShouldShowOrderCode(
+		ctx context.Context,
+		tenantID, cityID, positionID int64,
+	) (bool, error)
+}
+
 type Service interface {
 	GetWarningOrder(ctx context.Context, f WarningFilter) ([]int64, error)
 	GetFormattedOrdersByGroup(
@@ -130,6 +137,7 @@ type service struct {
 	addressParser       AddressParser
 	waitingTimeProvider WaitingTimeProvider
 	statusTranslator    StatusTranslator
+	showOrderCode       ShowOrderCodeProvider
 }
 
 func NewService(
@@ -137,12 +145,14 @@ func NewService(
 	addressParser AddressParser,
 	waitingTimeProvider WaitingTimeProvider,
 	statusTranslator StatusTranslator,
+	showOrderCode ShowOrderCodeProvider,
 ) Service {
 	return &service{
 		repo:                repo,
 		addressParser:       addressParser,
 		waitingTimeProvider: waitingTimeProvider,
 		statusTranslator:    statusTranslator,
+		showOrderCode:       showOrderCode,
 	}
 }
 
@@ -657,6 +667,7 @@ func (s *service) PrepareOrdersData(
 		return nil, err
 	}
 
+	//todo это нужно оптимизировать
 	for _, o := range orders {
 
 		// ===== 1. ДЕДУПЛИКАЦИЯ =====
@@ -709,7 +720,13 @@ func (s *service) PrepareOrdersData(
 		}
 
 		// ===== 8. ORDER NUMBER =====
+		showOrderCode, err := s.shouldShowOrderCode(ctx, o.TenantID, o.CityID, o.PositionID)
+		if err != nil {
+			return nil, err
+		}
+
 		orderNumber := ShowCodeOrID(
+			showOrderCode,
 			o.OrderCode,
 			o.OrderNumber,
 		)
@@ -928,20 +945,25 @@ func (s *service) translateStatus(
 	return translated, nil
 }
 
-func ShowCodeOrID(orderCode string, orderNumber int64) any {
-	//todo подумать о выносе настроек
-	//if showCode {
-	//	if orderCode != "" {
-	//		return orderCode
-	//	}
-	//	return orderNumber
-	//}
-	//return orderNumber
-
-	if orderCode != "" {
-		return orderCode
+func ShowCodeOrID(showCode bool, orderCode string, orderNumber int64) any {
+	if showCode {
+		if orderCode != "" {
+			return orderCode
+		}
+		return orderNumber
 	}
 	return orderNumber
+}
+
+func (s *service) shouldShowOrderCode(
+	ctx context.Context,
+	tenantID, cityID, positionID int64,
+) (bool, error) {
+	if s.showOrderCode == nil {
+		return false, nil
+	}
+
+	return s.showOrderCode.ShouldShowOrderCode(ctx, tenantID, cityID, positionID)
 }
 
 var redStatuses = map[int64]struct{}{
