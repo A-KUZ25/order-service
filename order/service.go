@@ -433,7 +433,6 @@ func (s *service) MapFullOrderToFormatted(
 	address []AddressOut,
 ) FormattedOrder {
 
-	// predv_price логика 1-в-1 с PHP
 	predvPrice := 0.0
 	if o.SummaryCost.Valid && o.SummaryCost.String != "" {
 		predvPrice = parseFloat(o.SummaryCost.String)

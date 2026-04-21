@@ -5,9 +5,16 @@ import (
 	"database/sql"
 	"strconv"
 	"sync"
+	"time"
 )
 
 const settingShowOrderCode = "SHOW_ORDER_CODE"
+const showOrderCodeCacheTTL = 30 * time.Second
+
+type boolCacheEntry struct {
+	value     bool
+	expiresAt time.Time
+}
 
 type ShowOrderCodeProvider struct {
 	db    *sql.DB
@@ -28,7 +35,11 @@ func (p *ShowOrderCodeProvider) ShouldShowOrderCode(
 		strconv.FormatInt(cityID, 10) + ":" +
 		strconv.FormatInt(positionID, 10)
 	if cached, ok := p.cache.Load(cacheKey); ok {
-		return cached.(bool), nil
+		entry := cached.(boolCacheEntry)
+		if time.Now().Before(entry.expiresAt) {
+			return entry.value, nil
+		}
+		p.cache.Delete(cacheKey)
 	}
 
 	value, found, err := p.loadTenantSetting(ctx, tenantID, cityID, positionID)
@@ -43,7 +54,10 @@ func (p *ShowOrderCodeProvider) ShouldShowOrderCode(
 	}
 
 	result := value == "1"
-	p.cache.Store(cacheKey, result)
+	p.cache.Store(cacheKey, boolCacheEntry{
+		value:     result,
+		expiresAt: time.Now().Add(showOrderCodeCacheTTL),
+	})
 	return result, nil
 }
 
