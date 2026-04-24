@@ -21,14 +21,6 @@ func NewHandler(service order.Service) *Handler {
 	}
 }
 
-type ordersResponse struct {
-	OrderTotalCount int64                         `json:"orderTotalCount"`
-	OrdersForSignal map[order.StatusGroup][]int64 `json:"ordersForSignal"`
-	OrderCounts     map[order.StatusGroup]int     `json:"orderCounts"`
-	CountPerPage    int                           `json:"countPerPage"`
-	Orders          []order.PreparedOrder         `json:"orders"`
-}
-
 func (h *Handler) Orders(w http.ResponseWriter, r *http.Request) {
 	var req WarningFullRequest
 	start := time.Now()
@@ -52,7 +44,7 @@ func (h *Handler) Orders(w http.ResponseWriter, r *http.Request) {
 
 	var (
 		totalCount int64
-		prepared   []order.PreparedOrder
+		prepared   []order.OrderView
 		tabs       order.GroupOrdersResult
 	)
 
@@ -99,13 +91,7 @@ func (h *Handler) Orders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := ordersResponse{
-		OrderTotalCount: totalCount,
-		OrdersForSignal: tabs.OrdersForSignal,
-		OrderCounts:     tabs.GroupCounts,
-		CountPerPage:    pageSize,
-		Orders:          prepared,
-	}
+	resp := buildOrdersResponse(totalCount, pageSize, tabs, prepared)
 
 	log.Println("Execution Orders took:", time.Since(start))
 	writeJSON(w, http.StatusOK, resp)

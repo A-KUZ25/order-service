@@ -13,7 +13,7 @@ func NewParser() *Parser {
 	return &Parser{}
 }
 
-func (p *Parser) ParseAddress(raw string) ([]order.AddressOut, error) {
+func (p *Parser) ParseAddress(raw string) ([]order.AddressView, error) {
 	if raw == "" {
 		return nil, nil
 	}
@@ -25,10 +25,10 @@ func (p *Parser) ParseAddress(raw string) ([]order.AddressOut, error) {
 
 	addressMap, ok := value.(map[string]any)
 	if !ok {
-		return []order.AddressOut{}, nil
+		return []order.AddressView{}, nil
 	}
 
-	result := make([]order.AddressOut, 0, len(addressMap))
+	result := make([]order.AddressView, 0, len(addressMap))
 	keys := make([]string, 0, len(addressMap))
 	for key := range addressMap {
 		keys = append(keys, key)
@@ -57,7 +57,7 @@ func (p *Parser) ParseAddress(raw string) ([]order.AddressOut, error) {
 			continue
 		}
 
-		address := order.AddressOut{
+		address := order.AddressView{
 			ID:      nullablePHPString(item["city_id"]),
 			City:    nullablePHPString(item["city"]),
 			Street:  nullablePHPString(item["street"]),

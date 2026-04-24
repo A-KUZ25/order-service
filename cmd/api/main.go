@@ -4,6 +4,8 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"orders-service/internal/app/orderformat"
+	"orders-service/internal/app/orderview"
 	"orders-service/internal/db"
 	"orders-service/internal/legacy/address"
 	"orders-service/internal/repository/mysql"
@@ -55,10 +57,12 @@ func main() {
 	}
 	service := order.NewService(
 		repo,
-		address.NewParser(),
-		redisactive.NewActiveOrdersRepository(redisClient),
-		mysql.NewStatusTranslator(mysqlDB),
-		mysql.NewShowOrderCodeProvider(mysqlDB),
+		orderformat.NewAddressResolver(address.NewParser()),
+		orderview.NewAssembler(
+			redisactive.NewActiveOrdersRepository(redisClient),
+			mysql.NewStatusTranslator(mysqlDB),
+			mysql.NewShowOrderCodeProvider(mysqlDB),
+		),
 	)
 	handler := orderhttp.NewHandler(service)
 

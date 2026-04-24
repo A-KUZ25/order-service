@@ -168,12 +168,12 @@ func (s *testService) GetWarningOrder(ctx context.Context, f WarningFilter) ([]i
 	return s.getWarningOrderFunc(ctx, f)
 }
 
-type stubAddressParser struct {
-	parseFunc func(raw string) ([]AddressOut, error)
+type stubAddressResolver struct {
+	resolveFunc func(orders []FullOrder) (map[int64][]AddressView, error)
 }
 
-func (s stubAddressParser) ParseAddress(raw string) ([]AddressOut, error) {
-	return s.parseFunc(raw)
+func (s stubAddressResolver) ResolveAddresses(orders []FullOrder) (map[int64][]AddressView, error) {
+	return s.resolveFunc(orders)
 }
 
 type stubWaitingTimeProvider struct {
@@ -209,11 +209,111 @@ func (s stubShowOrderCodeProvider) ShouldShowOrderCode(
 	return s.shouldFunc(ctx, tenantID, cityID, positionID)
 }
 
+type testOrderViewAssembler struct {
+	waitingTimeProvider WaitingTimeProvider
+	statusTranslator    StatusTranslator
+	showOrderCode       ShowOrderCodeProvider
+}
+
+func newTestOrderViewAssembler(
+	waitingTimeProvider WaitingTimeProvider,
+	statusTranslator StatusTranslator,
+	showOrderCode ShowOrderCodeProvider,
+) OrderViewAssembler {
+	return &testOrderViewAssembler{
+		waitingTimeProvider: waitingTimeProvider,
+		statusTranslator:    statusTranslator,
+		showOrderCode:       showOrderCode,
+	}
+}
+
+func (a *testOrderViewAssembler) BuildOrderView(
+	ctx context.Context,
+	o FormattedOrder,
+	f WarningFilter,
+	statusChangeTimes map[StatusKey]int64,
+) (OrderView, error) {
+	statusName := o.Status.Name
+	if a.statusTranslator != nil && statusName != "" {
+		translated, err := a.statusTranslator.TranslateStatus(ctx, f.BaseFilter.Language, statusName)
+		if err != nil {
+			return OrderView{}, err
+		}
+		if translated != "" {
+			statusName = translated
+		}
+	}
+
+	waitTime := int64(0)
+	if a.waitingTimeProvider != nil {
+		value, err := a.waitingTimeProvider.GetWorkerWaitingTime(ctx, o.TenantID, o.OrderID)
+		if err != nil {
+			return OrderView{}, err
+		}
+		waitTime = value
+	}
+
+	showCode := false
+	if a.showOrderCode != nil {
+		value, err := a.showOrderCode.ShouldShowOrderCode(ctx, o.TenantID, o.CityID, o.PositionID)
+		if err != nil {
+			return OrderView{}, err
+		}
+		showCode = value
+	}
+
+	return OrderView{
+		ID:             o.OrderID,
+		OrderNumber:    ShowCodeOrID(showCode, o.OrderCode, o.OrderNumber),
+		OrderIDForSort: o.OrderNumber,
+		Status: OrderStatusView{
+			StatusID: o.Status.StatusID,
+			Name:     statusName,
+			Category: GetCategory(o.StatusID),
+			Color:    GetColor(o.StatusID),
+		},
+		DateForSort:  formatOrderTimeForSort(o.OrderTime),
+		Date:         formatOrderTime(o.OrderTime),
+		Address:      o.Address,
+		CityID:       o.CityID,
+		Phone:        o.Phone,
+		Device:       o.Device,
+		DeviceName:   GetDeviceName(o.Device),
+		Client:       ClientView{ClientID: o.Client.ClientID, Phone: o.Client.Phone, Name: o.Client.Name, LastName: o.Client.LastName},
+		Dispatcher:   BuildDispatcher(o),
+		Worker:       BuildWorker(o),
+		Car:          BuildCar(o),
+		Tariff:       BuildTariff(o),
+		Options:      o.Options,
+		Comment:      o.Comment,
+		SummaryCost:  resolveSummaryCost(o, f.BaseFilter.Group),
+		StatusTime:   getTimeOrderStatusChanged(o.OrderID, o.StatusID, o.StatusTime, statusChangeTimes),
+		TimeToClient: o.TimeToClient,
+		WaitTime:     waitTime,
+		CreateTime:   o.CreateTime,
+		OrderTime:    o.OrderTime - o.TimeOffset,
+		PositionID:   o.PositionID,
+		UnitQuantity: o.UnitQuantity,
+	}, nil
+}
+
+func newServiceWithRepo(repo Repository) *service {
+	return &service{
+		warningReader:      repo,
+		orderListReader:    repo,
+		groupOrderReader:   repo,
+		optionsReader:      repo,
+		statusChangeReader: repo,
+		addressResolver:    stubAddressResolver{resolveFunc: func(orders []FullOrder) (map[int64][]AddressView, error) { return map[int64][]AddressView{}, nil }},
+		assembler:          newTestOrderViewAssembler(nil, nil, nil),
+	}
+}
+
 func TestGetOrdersByGroup_NotWarning(t *testing.T) {
 	ctx := context.Background()
 
 	repo := new(MockRepository)
-	svc := &service{repo: repo}
+	svc := newServiceWithRepo(repo)
 
 	filter := WarningFilter{
 		BaseFilter: BaseFilter{
@@ -257,7 +357,7 @@ func TestGetOrdersByGroup_Warning_FullMock(t *testing.T) {
 	ctx := context.Background()
 
 	repo := new(MockRepository)
-	svc := &service{repo: repo}
+	svc := newServiceWithRepo(repo)
 
 	filter := WarningFilter{
 		BaseFilter: BaseFilter{
@@ -328,7 +428,7 @@ func TestGetWarningOrder_MergesDeduplicatesAndSorts(t *testing.T) {
 	ctx := context.Background()
 
 	repo := new(MockRepository)
-	svc := &service{repo: repo}
+	svc := newServiceWithRepo(repo)
 
 	filter := WarningFilter{
 		BaseFilter: BaseFilter{TenantID: 68},
@@ -361,7 +461,7 @@ func TestGetWarningOrder_ReturnsError(t *testing.T) {
 	ctx := context.Background()
 
 	repo := new(MockRepository)
-	svc := &service{repo: repo}
+	svc := newServiceWithRepo(repo)
 	filter := WarningFilter{BaseFilter: BaseFilter{TenantID: 68}}
 
 	repo.On("FetchUnpaid", mock.Anything, mock.AnythingOfType("order.UnpaidFilter")).
@@ -382,10 +482,16 @@ func TestGetFormattedOrdersByGroup_ParsesAddressesAndLoadsOptions(t *testing.T) 
 	repo := new(MockRepository)
 
 	svc := &service{
-		repo: repo,
-		addressParser: stubAddressParser{
-			parseFunc: func(raw string) ([]AddressOut, error) {
-				return []AddressOut{{Street: strPtr("parsed " + raw), Type: "house"}}, nil
+		warningReader:      repo,
+		orderListReader:    repo,
+		groupOrderReader:   repo,
+		optionsReader:      repo,
+		statusChangeReader: repo,
+		addressResolver: stubAddressResolver{
+			resolveFunc: func(orders []FullOrder) (map[int64][]AddressView, error) {
+				return map[int64][]AddressView{
+					1: {{Street: strPtr("parsed a:1"), Type: "house"}},
+				}, nil
 			},
 		},
 	}
@@ -420,9 +526,13 @@ func TestGetFormattedOrdersByGroup_ReturnsAddressParserError(t *testing.T) {
 	ctx := context.Background()
 	repo := new(MockRepository)
 	svc := &service{
-		repo: repo,
-		addressParser: stubAddressParser{
-			parseFunc: func(raw string) ([]AddressOut, error) {
+		warningReader:      repo,
+		orderListReader:    repo,
+		groupOrderReader:   repo,
+		optionsReader:      repo,
+		statusChangeReader: repo,
+		addressResolver: stubAddressResolver{
+			resolveFunc: func(orders []FullOrder) (map[int64][]AddressView, error) {
 				return nil, errors.New("bad address")
 			},
 		},
@@ -447,29 +557,35 @@ func TestPrepareOrdersData_AppliesTranslationWaitTimeStatusTimeAndShowCode(t *te
 	ctx := context.Background()
 	repo := new(MockRepository)
 	svc := &service{
-		repo: repo,
-		waitingTimeProvider: stubWaitingTimeProvider{
-			getFunc: func(ctx context.Context, tenantID, orderID int64) (int64, error) {
-				require.Equal(t, int64(68), tenantID)
-				require.Equal(t, int64(11), orderID)
-				return 180, nil
+		warningReader:      repo,
+		orderListReader:    repo,
+		groupOrderReader:   repo,
+		optionsReader:      repo,
+		statusChangeReader: repo,
+		assembler: newTestOrderViewAssembler(
+			stubWaitingTimeProvider{
+				getFunc: func(ctx context.Context, tenantID, orderID int64) (int64, error) {
+					require.Equal(t, int64(68), tenantID)
+					require.Equal(t, int64(11), orderID)
+					return 180, nil
+				},
 			},
-		},
-		statusTranslator: stubStatusTranslator{
-			translateFunc: func(ctx context.Context, language, name string) (string, error) {
-				require.Equal(t, "ru", language)
-				require.Equal(t, "New order", name)
-				return "Новый заказ", nil
+			stubStatusTranslator{
+				translateFunc: func(ctx context.Context, language, name string) (string, error) {
+					require.Equal(t, "ru", language)
+					require.Equal(t, "New order", name)
+					return "Новый заказ", nil
+				},
 			},
-		},
-		showOrderCode: stubShowOrderCodeProvider{
-			shouldFunc: func(ctx context.Context, tenantID, cityID, positionID int64) (bool, error) {
-				require.Equal(t, int64(68), tenantID)
-				require.Equal(t, int64(26068), cityID)
-				require.Equal(t, int64(1), positionID)
-				return true, nil
+			stubShowOrderCodeProvider{
+				shouldFunc: func(ctx context.Context, tenantID, cityID, positionID int64) (bool, error) {
+					require.Equal(t, int64(68), tenantID)
+					require.Equal(t, int64(26068), cityID)
+					require.Equal(t, int64(1), positionID)
+					return true, nil
+				},
 			},
-		},
+		),
 	}
 
 	repo.On("GetStatusChangeTimes", mock.Anything, []StatusKey{{OrderID: 11, StatusID: 1}}).
@@ -494,7 +610,7 @@ func TestPrepareOrdersData_AppliesTranslationWaitTimeStatusTimeAndShowCode(t *te
 			CreateTime:           444,
 			Status:               StatusDTO{StatusID: 1, Name: "New order"},
 			Client:               ClientDTO{ClientID: 88},
-			Address:              []AddressOut{{Street: strPtr("Lenina"), Type: "house"}},
+			Address:              []AddressView{{Street: strPtr("Lenina"), Type: "house"}},
 		},
 		{
 			OrderID:     11,
@@ -534,17 +650,24 @@ func TestPrepareOrdersData_UsesCompletedSummaryCostAndOrderNumberFallback(t *tes
 	ctx := context.Background()
 	repo := new(MockRepository)
 	svc := &service{
-		repo: repo,
-		statusTranslator: stubStatusTranslator{
-			translateFunc: func(ctx context.Context, language, name string) (string, error) {
-				return "", nil
+		warningReader:      repo,
+		orderListReader:    repo,
+		groupOrderReader:   repo,
+		optionsReader:      repo,
+		statusChangeReader: repo,
+		assembler: newTestOrderViewAssembler(
+			nil,
+			stubStatusTranslator{
+				translateFunc: func(ctx context.Context, language, name string) (string, error) {
+					return "", nil
+				},
 			},
-		},
-		showOrderCode: stubShowOrderCodeProvider{
-			shouldFunc: func(ctx context.Context, tenantID, cityID, positionID int64) (bool, error) {
-				return false, nil
+			stubShowOrderCodeProvider{
+				shouldFunc: func(ctx context.Context, tenantID, cityID, positionID int64) (bool, error) {
+					return false, nil
+				},
 			},
-		},
+		),
 	}
 
 	repo.On("GetStatusChangeTimes", mock.Anything, []StatusKey{{OrderID: 21, StatusID: 38}}).
@@ -606,12 +729,20 @@ func TestPrepareOrdersData_ReturnsDependencyErrors(t *testing.T) {
 
 	t.Run("translator error", func(t *testing.T) {
 		svc := &service{
-			repo: repo,
-			statusTranslator: stubStatusTranslator{
-				translateFunc: func(ctx context.Context, language, name string) (string, error) {
-					return "", errors.New("translate failed")
+			warningReader:      repo,
+			orderListReader:    repo,
+			groupOrderReader:   repo,
+			optionsReader:      repo,
+			statusChangeReader: repo,
+			assembler: newTestOrderViewAssembler(
+				nil,
+				stubStatusTranslator{
+					translateFunc: func(ctx context.Context, language, name string) (string, error) {
+						return "", errors.New("translate failed")
+					},
 				},
-			},
+				nil,
+			),
 		}
 
 		prepared, err := svc.PrepareOrdersData(ctx, []FormattedOrder{baseOrder}, WarningFilter{
@@ -623,12 +754,20 @@ func TestPrepareOrdersData_ReturnsDependencyErrors(t *testing.T) {
 
 	t.Run("wait time error", func(t *testing.T) {
 		svc := &service{
-			repo: repo,
-			waitingTimeProvider: stubWaitingTimeProvider{
-				getFunc: func(ctx context.Context, tenantID, orderID int64) (int64, error) {
-					return 0, errors.New("wait failed")
+			warningReader:      repo,
+			orderListReader:    repo,
+			groupOrderReader:   repo,
+			optionsReader:      repo,
+			statusChangeReader: repo,
+			assembler: newTestOrderViewAssembler(
+				stubWaitingTimeProvider{
+					getFunc: func(ctx context.Context, tenantID, orderID int64) (int64, error) {
+						return 0, errors.New("wait failed")
+					},
 				},
-			},
+				nil,
+				nil,
+			),
 		}
 
 		prepared, err := svc.PrepareOrdersData(ctx, []FormattedOrder{baseOrder}, WarningFilter{
@@ -640,12 +779,20 @@ func TestPrepareOrdersData_ReturnsDependencyErrors(t *testing.T) {
 
 	t.Run("show code error", func(t *testing.T) {
 		svc := &service{
-			repo: repo,
-			showOrderCode: stubShowOrderCodeProvider{
-				shouldFunc: func(ctx context.Context, tenantID, cityID, positionID int64) (bool, error) {
-					return false, errors.New("show code failed")
+			warningReader:      repo,
+			orderListReader:    repo,
+			groupOrderReader:   repo,
+			optionsReader:      repo,
+			statusChangeReader: repo,
+			assembler: newTestOrderViewAssembler(
+				nil,
+				nil,
+				stubShowOrderCodeProvider{
+					shouldFunc: func(ctx context.Context, tenantID, cityID, positionID int64) (bool, error) {
+						return false, errors.New("show code failed")
+					},
 				},
-			},
+			),
 		}
 
 		prepared, err := svc.PrepareOrdersData(ctx, []FormattedOrder{baseOrder}, WarningFilter{
@@ -661,13 +808,13 @@ func TestGetOrdersForTabs_MergesWarningAndBuildsSignalGroups(t *testing.T) {
 	repo := stubRepository{
 		fetchOrdersByStatusGroup: func(ctx context.Context, f BaseFilter) ([]int64, error) {
 			switch {
-			case f.SelectForDate == false && requireStatusSet(f.Status, orderGroupIds[StatusGroup0]):
+			case f.SelectForDate == false && requireStatusSet(f.Status, orderGroupIDs[StatusGroup0]):
 				return []int64{1, 2}, nil
-			case f.SelectForDate == false && requireStatusSet(f.Status, orderGroupIds[StatusGroup6]):
+			case f.SelectForDate == false && requireStatusSet(f.Status, orderGroupIDs[StatusGroup6]):
 				return []int64{6}, nil
-			case f.SelectForDate == true && requireStatusSet(f.Status, orderGroupIds[StatusGroup7]):
+			case f.SelectForDate == true && requireStatusSet(f.Status, orderGroupIDs[StatusGroup7]):
 				return []int64{7, 8}, nil
-			case f.SelectForDate == false && requireStatusSet(f.Status, orderGroupIds[StatusGroup8]):
+			case f.SelectForDate == false && requireStatusSet(f.Status, orderGroupIDs[StatusGroup8]):
 				return []int64{10, 11, 12}, nil
 			default:
 				t.Fatalf("unexpected filter: %+v", f)
@@ -684,7 +831,7 @@ func TestGetOrdersForTabs_MergesWarningAndBuildsSignalGroups(t *testing.T) {
 			return []int64{14}, nil
 		},
 	}
-	svc := &service{repo: repo}
+	svc := newServiceWithRepo(repo)
 
 	filter := WarningFilter{
 		BaseFilter: BaseFilter{
@@ -715,7 +862,7 @@ func TestGetOrdersForTabs_ReturnsGroupFetchError(t *testing.T) {
 			return nil, errors.New("group failed")
 		},
 	}
-	svc := &service{repo: repo}
+	svc := newServiceWithRepo(repo)
 
 	filter := WarningFilter{
 		BaseFilter: BaseFilter{TenantID: 68},

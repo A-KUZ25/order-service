@@ -28,7 +28,7 @@ type stubService struct {
 		ctx context.Context,
 		orders []order.FormattedOrder,
 		f order.WarningFilter,
-	) ([]order.PreparedOrder, error)
+	) ([]order.OrderView, error)
 }
 
 func (s stubService) GetWarningOrder(ctx context.Context, f order.WarningFilter) ([]int64, error) {
@@ -54,7 +54,7 @@ func (s stubService) PrepareOrdersData(
 	ctx context.Context,
 	orders []order.FormattedOrder,
 	f order.WarningFilter,
-) ([]order.PreparedOrder, error) {
+) ([]order.OrderView, error) {
 	return s.prepareOrdersDataFunc(ctx, orders, f)
 }
 
@@ -107,10 +107,10 @@ func TestOrders_SuccessUsesDefaultsAndBuildsResponse(t *testing.T) {
 			ctx context.Context,
 			orders []order.FormattedOrder,
 			f order.WarningFilter,
-		) ([]order.PreparedOrder, error) {
+		) ([]order.OrderView, error) {
 			require.Len(t, orders, 1)
 			require.Equal(t, "ru", f.BaseFilter.Language)
-			return []order.PreparedOrder{{
+			return []order.OrderView{{
 				ID:          1,
 				OrderNumber: "q4ccf",
 			}}, nil
@@ -154,8 +154,8 @@ func TestOrders_SuccessUsesDefaultsAndBuildsResponse(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	require.Equal(t, int64(2), resp.OrderTotalCount)
 	require.Equal(t, 50, resp.CountPerPage)
-	require.Equal(t, map[order.StatusGroup]int{order.StatusGroup0: 3}, resp.OrderCounts)
-	require.Equal(t, map[order.StatusGroup][]int64{order.StatusGroup0: {1, 2}}, resp.OrdersForSignal)
+	require.Equal(t, map[string]int{string(order.StatusGroup0): 3}, resp.OrderCounts)
+	require.Equal(t, map[string][]int64{string(order.StatusGroup0): {1, 2}}, resp.OrdersForSignal)
 	require.Len(t, resp.Orders, 1)
 	require.Equal(t, "q4ccf", resp.Orders[0].OrderNumber)
 }
@@ -179,7 +179,7 @@ func TestOrders_ReturnsServiceError(t *testing.T) {
 			ctx context.Context,
 			orders []order.FormattedOrder,
 			f order.WarningFilter,
-		) ([]order.PreparedOrder, error) {
+		) ([]order.OrderView, error) {
 			return nil, nil
 		},
 	}
