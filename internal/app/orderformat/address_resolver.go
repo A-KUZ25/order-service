@@ -1,6 +1,6 @@
 package orderformat
 
-import "orders-service/order"
+import "orders-service/internal/app/order"
 
 type RawAddressParser interface {
 	ParseAddress(raw string) ([]order.AddressView, error)

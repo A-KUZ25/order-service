@@ -2,7 +2,7 @@ package mysql
 
 import (
 	"context"
-	"orders-service/order"
+	"orders-service/internal/app/order"
 	"strings"
 )
 

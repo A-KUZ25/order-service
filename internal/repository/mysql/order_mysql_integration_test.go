@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"orders-service/order"
+	"orders-service/internal/app/order"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/stretchr/testify/require"

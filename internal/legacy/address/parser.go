@@ -1,8 +1,8 @@
 package address
 
 import (
+	"orders-service/internal/app/order"
 	"orders-service/internal/legacy/phpdata"
-	"orders-service/order"
 	"sort"
 	"strconv"
 )

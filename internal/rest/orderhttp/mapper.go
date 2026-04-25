@@ -1,6 +1,6 @@
 package orderhttp
 
-import "orders-service/order"
+import "orders-service/internal/app/order"
 
 func buildOrdersResponse(
 	totalCount int64,

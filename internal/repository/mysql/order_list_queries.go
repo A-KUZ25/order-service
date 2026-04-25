@@ -3,7 +3,7 @@ package mysql
 import (
 	"context"
 	"log"
-	"orders-service/order"
+	"orders-service/internal/app/order"
 	"strings"
 	"time"
 )

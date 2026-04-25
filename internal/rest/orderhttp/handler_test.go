@@ -9,7 +9,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"orders-service/order"
+	"orders-service/internal/app/order"
 
 	"github.com/stretchr/testify/require"
 )

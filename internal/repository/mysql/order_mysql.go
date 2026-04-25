@@ -5,10 +5,16 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
-	"orders-service/order"
+	"orders-service/internal/app/order"
 	"strings"
 	"time"
 )
+
+var allowedSortFields = map[string]string{
+	"o.status_time": "o.status_time",
+	"o.order_id":    "o.order_id",
+	"o.order_time":  "o.order_time",
+}
 
 type OrdersRepository struct {
 	db *sql.DB
@@ -91,17 +97,27 @@ func (r *OrdersRepository) buildBaseQuery(sb *strings.Builder, args *[]any, f or
 }
 
 func (r *OrdersRepository) appendOrderBy(sb *strings.Builder, f order.BaseFilter) {
-	orderField := f.SortField
-	if orderField == "" {
-		orderField = "o.status_time"
+	sb.WriteString("ORDER BY ")
+	sb.WriteString(normalizeSortField(f.SortField))
+	sb.WriteString(" ")
+	sb.WriteString(normalizeSortDirection(f.SortOrder))
+	sb.WriteString("\n")
+}
+
+func normalizeSortField(value string) string {
+	if normalized, ok := allowedSortFields[value]; ok {
+		return normalized
 	}
 
-	orderDir := "DESC"
-	if strings.ToLower(string(f.SortOrder)) == "asc" {
-		orderDir = "ASC"
+	return "o.status_time"
+}
+
+func normalizeSortDirection(value string) string {
+	if strings.EqualFold(value, "asc") {
+		return "ASC"
 	}
 
-	sb.WriteString("ORDER BY " + orderField + " " + orderDir + "\n")
+	return "DESC"
 }
 
 func (r *OrdersRepository) executeQuery(

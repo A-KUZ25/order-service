@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"log"
-	"orders-service/order"
+	"orders-service/internal/app/order"
 	"strings"
 	"time"
 )

@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"orders-service/order"
+	"orders-service/internal/app/order"
 
 	"golang.org/x/sync/errgroup"
 )
