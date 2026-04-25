@@ -522,7 +522,7 @@ func TestGetFormattedOrdersByGroup_ParsesAddressesAndLoadsOptions(t *testing.T) 
 	repo.AssertExpectations(t)
 }
 
-func TestGetFormattedOrdersByGroup_ReturnsAddressParserError(t *testing.T) {
+func TestGetFormattedOrdersByGroup_ReturnsAddressResolverError(t *testing.T) {
 	ctx := context.Background()
 	repo := new(MockRepository)
 	svc := &service{
