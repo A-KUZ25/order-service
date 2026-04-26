@@ -8,6 +8,12 @@ type ordersResponse struct {
 	Orders          []orderViewResponse `json:"orders"`
 }
 
+type allOrdersResponse struct {
+	OrderTotalCount int64               `json:"orderTotalCount"`
+	CountPerPage    int                 `json:"countPerPage"`
+	Orders          []orderViewResponse `json:"orders"`
+}
+
 type orderViewResponse struct {
 	ID             int64             `json:"id"`
 	OrderNumber    any               `json:"order_number"`

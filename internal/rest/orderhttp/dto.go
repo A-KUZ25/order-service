@@ -26,3 +26,18 @@ type WarningFullRequest struct {
 	PageSize               int     `json:"page_size"`
 	Group                  string  `json:"group"`
 }
+
+type SearchAttributeRequest struct {
+	Attribute    string `json:"attribute"`
+	SearchString string `json:"searchString"`
+}
+
+type GetAllOrdersRequest struct {
+	OrderBaseRequest
+	Page         int                      `json:"page"`
+	PageSize     int                      `json:"page_size"`
+	SearchStatus string                   `json:"search_status"`
+	Attributes   []SearchAttributeRequest `json:"attributes"`
+	SearchString map[string]string        `json:"search_string"`
+	ShopIDs      []int64                  `json:"shop_ids"`
+}

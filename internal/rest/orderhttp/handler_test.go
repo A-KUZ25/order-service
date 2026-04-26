@@ -29,6 +29,10 @@ type stubService struct {
 		orders []order.FormattedOrder,
 		f order.WarningFilter,
 	) ([]order.OrderView, error)
+	getAllOrdersFunc func(
+		ctx context.Context,
+		f order.GetAllOrdersFilter,
+	) (order.GetAllOrdersResult, error)
 }
 
 func (s stubService) GetWarningOrder(ctx context.Context, f order.WarningFilter) ([]int64, error) {
@@ -56,6 +60,16 @@ func (s stubService) PrepareOrdersData(
 	f order.WarningFilter,
 ) ([]order.OrderView, error) {
 	return s.prepareOrdersDataFunc(ctx, orders, f)
+}
+
+func (s stubService) GetAllOrders(
+	ctx context.Context,
+	f order.GetAllOrdersFilter,
+) (order.GetAllOrdersResult, error) {
+	if s.getAllOrdersFunc != nil {
+		return s.getAllOrdersFunc(ctx, f)
+	}
+	return order.GetAllOrdersResult{}, nil
 }
 
 func TestOrders_BadJSON(t *testing.T) {
@@ -200,4 +214,70 @@ func TestOrders_ReturnsServiceError(t *testing.T) {
 
 	require.Equal(t, http.StatusInternalServerError, rec.Code)
 	require.Contains(t, rec.Body.String(), "internal error: formatted failed")
+}
+
+func TestAllOrders_Success(t *testing.T) {
+	date := "2026-03-21"
+	var gotFilter order.GetAllOrdersFilter
+
+	handler := NewHandler(stubService{
+		getAllOrdersFunc: func(
+			ctx context.Context,
+			f order.GetAllOrdersFilter,
+		) (order.GetAllOrdersResult, error) {
+			gotFilter = f
+			return order.GetAllOrdersResult{
+				OrderTotalCount: 2,
+				CountPerPage:    50,
+				Orders: []order.OrderView{{
+					ID:          1,
+					OrderNumber: "q4ccf",
+				}},
+			}, nil
+		},
+	})
+
+	body, err := json.Marshal(GetAllOrdersRequest{
+		OrderBaseRequest: OrderBaseRequest{
+			TenantID:  68,
+			CityIDs:   []int64{26068},
+			Language:  "ru",
+			Date:      &date,
+			Tariffs:   []int64{1033},
+			SortField: "order_id",
+			SortOrder: "desc",
+		},
+		Page:         0,
+		PageSize:     50,
+		SearchStatus: "warning",
+		Attributes: []SearchAttributeRequest{{
+			Attribute:    "number",
+			SearchString: "123",
+		}},
+		SearchString: map[string]string{
+			"client": "7999",
+		},
+		ShopIDs: []int64{10, 11},
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/orders/all", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	handler.AllOrders(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, int64(68), gotFilter.TenantID)
+	require.Equal(t, []int64{26068}, gotFilter.CityIDs)
+	require.Equal(t, "warning", gotFilter.SearchStatus)
+	require.Equal(t, "number", gotFilter.Attributes[0].Attribute)
+	require.Equal(t, "7999", gotFilter.SearchString["client"])
+	require.Equal(t, []int64{10, 11}, gotFilter.ShopIDs)
+
+	var resp allOrdersResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, int64(2), resp.OrderTotalCount)
+	require.Equal(t, 50, resp.CountPerPage)
+	require.Len(t, resp.Orders, 1)
+	require.Equal(t, "q4ccf", resp.Orders[0].OrderNumber)
 }

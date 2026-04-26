@@ -76,6 +76,10 @@ type GroupOrderReader interface {
 	) ([]int64, error)
 }
 
+type AllOrdersReader interface {
+	FetchAllOrdersForGetAll(ctx context.Context, f GetAllOrdersFilter) ([]FullOrder, error)
+}
+
 type OrderOptionsReader interface {
 	GetOptionsForOrders(
 		ctx context.Context,
@@ -94,6 +98,7 @@ type Repository interface {
 	WarningOrderReader
 	OrderListReader
 	GroupOrderReader
+	AllOrdersReader
 	OrderOptionsReader
 	StatusChangeReader
 }
@@ -129,6 +134,10 @@ type OrderViewAssembler interface {
 	) (OrderView, error)
 }
 
+type ActiveOrdersReader interface {
+	GetFormattedActiveOrders(ctx context.Context, tenantID int64) ([]FormattedOrder, error)
+}
+
 type Service interface {
 	GetWarningOrder(ctx context.Context, f WarningFilter) ([]int64, error)
 	GetFormattedOrdersByGroup(
@@ -145,6 +154,7 @@ type Service interface {
 		orders []FormattedOrder,
 		f WarningFilter,
 	) ([]OrderView, error)
+	GetAllOrders(ctx context.Context, f GetAllOrdersFilter) (GetAllOrdersResult, error)
 }
 
 type WarningGroupResult struct {
@@ -157,14 +167,17 @@ type service struct {
 	warningReader      WarningOrderReader
 	orderListReader    OrderListReader
 	groupOrderReader   GroupOrderReader
+	allOrdersReader    AllOrdersReader
 	optionsReader      OrderOptionsReader
 	statusChangeReader StatusChangeReader
+	activeOrdersReader ActiveOrdersReader
 	assembler          OrderViewAssembler
 	addressResolver    OrderAddressResolver
 }
 
 func NewService(
 	repo Repository,
+	activeOrdersReader ActiveOrdersReader,
 	addressResolver OrderAddressResolver,
 	assembler OrderViewAssembler,
 ) Service {
@@ -172,8 +185,10 @@ func NewService(
 		warningReader:      repo,
 		orderListReader:    repo,
 		groupOrderReader:   repo,
+		allOrdersReader:    repo,
 		optionsReader:      repo,
 		statusChangeReader: repo,
+		activeOrdersReader: activeOrdersReader,
 		assembler:          assembler,
 		addressResolver:    addressResolver,
 	}

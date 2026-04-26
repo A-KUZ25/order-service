@@ -57,6 +57,7 @@ func main() {
 	}
 	service := order.NewService(
 		repo,
+		redisactive.NewActiveOrdersRepository(redisClient),
 		orderformat.NewAddressResolver(address.NewParser()),
 		orderview.NewAssembler(
 			redisactive.NewActiveOrdersRepository(redisClient),

@@ -17,6 +17,14 @@ func buildOrdersResponse(
 	}
 }
 
+func buildAllOrdersResponse(result order.GetAllOrdersResult) allOrdersResponse {
+	return allOrdersResponse{
+		OrderTotalCount: result.OrderTotalCount,
+		CountPerPage:    result.CountPerPage,
+		Orders:          mapOrderViews(result.Orders),
+	}
+}
+
 func mapStatusGroupIDs(values map[order.StatusGroup][]int64) map[string][]int64 {
 	result := make(map[string][]int64, len(values))
 	for key, ids := range values {

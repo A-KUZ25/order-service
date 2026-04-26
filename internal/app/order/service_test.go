@@ -15,14 +15,15 @@ type MockRepository struct {
 }
 
 type stubRepository struct {
-	fetchUnpaidFunc            func(ctx context.Context, f UnpaidFilter) ([]int64, error)
-	fetchBadReviewFunc         func(ctx context.Context, f BadReviewFilter) ([]int64, error)
-	fetchExceededPriceFunc     func(ctx context.Context, f ExceededPriceFilter) ([]int64, error)
-	countOrdersWithWarningFunc func(ctx context.Context, f BaseFilter, warningIDs []int64) (int64, error)
-	fetchOrdersWithWarningFunc func(ctx context.Context, f BaseFilter, warningIDs []int64, page, pageSize int) ([]FullOrder, error)
-	fetchOrdersByStatusGroup   func(ctx context.Context, f BaseFilter) ([]int64, error)
-	getOptionsForOrdersFunc    func(ctx context.Context, orderIDs []int64) (map[int64][]OptionDTO, error)
-	getStatusChangeTimesFunc   func(ctx context.Context, keys []StatusKey) (map[StatusKey]int64, error)
+	fetchUnpaidFunc             func(ctx context.Context, f UnpaidFilter) ([]int64, error)
+	fetchBadReviewFunc          func(ctx context.Context, f BadReviewFilter) ([]int64, error)
+	fetchExceededPriceFunc      func(ctx context.Context, f ExceededPriceFilter) ([]int64, error)
+	fetchAllOrdersForGetAllFunc func(ctx context.Context, f GetAllOrdersFilter) ([]FullOrder, error)
+	countOrdersWithWarningFunc  func(ctx context.Context, f BaseFilter, warningIDs []int64) (int64, error)
+	fetchOrdersWithWarningFunc  func(ctx context.Context, f BaseFilter, warningIDs []int64, page, pageSize int) ([]FullOrder, error)
+	fetchOrdersByStatusGroup    func(ctx context.Context, f BaseFilter) ([]int64, error)
+	getOptionsForOrdersFunc     func(ctx context.Context, orderIDs []int64) (map[int64][]OptionDTO, error)
+	getStatusChangeTimesFunc    func(ctx context.Context, keys []StatusKey) (map[StatusKey]int64, error)
 }
 
 func (s stubRepository) FetchUnpaid(ctx context.Context, f UnpaidFilter) ([]int64, error) {
@@ -44,6 +45,16 @@ func (s stubRepository) FetchExceededPrice(ctx context.Context, f ExceededPriceF
 		return nil, nil
 	}
 	return s.fetchExceededPriceFunc(ctx, f)
+}
+
+func (s stubRepository) FetchAllOrdersForGetAll(
+	ctx context.Context,
+	f GetAllOrdersFilter,
+) ([]FullOrder, error) {
+	if s.fetchAllOrdersForGetAllFunc == nil {
+		return nil, nil
+	}
+	return s.fetchAllOrdersForGetAllFunc(ctx, f)
 }
 
 func (s stubRepository) CountOrdersWithWarning(
@@ -113,6 +124,14 @@ func (m *MockRepository) FetchBadReview(ctx context.Context, f BadReviewFilter) 
 func (m *MockRepository) FetchExceededPrice(ctx context.Context, f ExceededPriceFilter) ([]int64, error) {
 	args := m.Called(ctx, f)
 	return args.Get(0).([]int64), args.Error(1)
+}
+
+func (m *MockRepository) FetchAllOrdersForGetAll(
+	ctx context.Context,
+	f GetAllOrdersFilter,
+) ([]FullOrder, error) {
+	args := m.Called(ctx, f)
+	return args.Get(0).([]FullOrder), args.Error(1)
 }
 
 func (m *MockRepository) CountOrdersWithWarning(
