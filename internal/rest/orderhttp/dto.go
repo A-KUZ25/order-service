@@ -1,5 +1,7 @@
 package orderhttp
 
+import "encoding/json"
+
 type OrderBaseRequest struct {
 	TenantID       int64   `json:"tenant_id"`
 	CityIDs        []int64 `json:"city_ids"`
@@ -32,12 +34,33 @@ type SearchAttributeRequest struct {
 	SearchString string `json:"searchString"`
 }
 
+type SearchStringMap map[string]string
+
+func (m *SearchStringMap) UnmarshalJSON(data []byte) error {
+	switch string(data) {
+	case "null":
+		*m = nil
+		return nil
+	case "[]":
+		*m = SearchStringMap{}
+		return nil
+	}
+
+	var value map[string]string
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+
+	*m = SearchStringMap(value)
+	return nil
+}
+
 type GetAllOrdersRequest struct {
 	OrderBaseRequest
 	Page         int                      `json:"page"`
 	PageSize     int                      `json:"page_size"`
 	SearchStatus string                   `json:"search_status"`
 	Attributes   []SearchAttributeRequest `json:"attributes"`
-	SearchString map[string]string        `json:"search_string"`
+	SearchString SearchStringMap          `json:"search_string"`
 	ShopIDs      []int64                  `json:"shop_ids"`
 }
