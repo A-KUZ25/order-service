@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"orders-service/internal/app/order"
 	legacyaddress "orders-service/internal/legacy/address"
 	"orders-service/internal/legacy/phpdata"
@@ -78,24 +79,29 @@ func (r *ActiveOrdersRepository) GetFormattedActiveOrders(
 	for _, raw := range values {
 		payload, err := maybeGunzip([]byte(raw))
 		if err != nil {
-			return nil, fmt.Errorf("active orders gunzip: %w", err)
+			log.Printf("skip active order payload: gunzip failed: %v", err)
+			continue
 		}
 
 		value, err := phpdata.Unmarshal(payload)
 		if err != nil {
-			return nil, fmt.Errorf("active orders phpdata unmarshal: %w", err)
+			log.Printf("skip active order payload: phpdata unmarshal failed: %v", err)
+			continue
 		}
 
 		orderData, ok := value.(map[string]any)
 		if !ok {
+			log.Printf("skip active order payload: unexpected top-level type %T", value)
 			continue
 		}
 
 		formatted, ok, err := r.mapActiveOrder(orderData)
 		if err != nil {
-			return nil, err
+			log.Printf("skip active order payload: %v", err)
+			continue
 		}
 		if !ok {
+			log.Printf("skip active order payload: missing required fields")
 			continue
 		}
 		result = append(result, formatted)
