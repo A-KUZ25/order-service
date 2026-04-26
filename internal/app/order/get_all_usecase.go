@@ -2,6 +2,7 @@ package order
 
 import (
 	"context"
+	"log"
 	"sort"
 	"strconv"
 	"strings"
@@ -9,27 +10,34 @@ import (
 )
 
 func (s *service) GetAllOrders(ctx context.Context, f GetAllOrdersFilter) (GetAllOrdersResult, error) {
+	log.Printf("getAll: mysql fetch start tenant=%d searchStatus=%q page=%d pageSize=%d", f.TenantID, f.SearchStatus, f.Page, f.PageSize)
 	mysqlOrders, err := s.allOrdersReader.FetchAllOrdersForGetAll(ctx, f)
 	if err != nil {
 		return GetAllOrdersResult{}, err
 	}
+	log.Printf("getAll: mysql fetch done count=%d", len(mysqlOrders))
 
 	addressMap := make(map[int64][]AddressView, len(mysqlOrders))
 	if s.addressResolver != nil {
+		log.Printf("getAll: mysql address resolve start count=%d", len(mysqlOrders))
 		addressMap, err = s.addressResolver.ResolveAddresses(mysqlOrders)
 		if err != nil {
 			return GetAllOrdersResult{}, err
 		}
+		log.Printf("getAll: mysql address resolve done count=%d", len(addressMap))
 	}
 
 	mysqlFormatted := s.MapOrders(mysqlOrders, map[int64][]OptionDTO{}, addressMap)
+	log.Printf("getAll: mysql formatted done count=%d", len(mysqlFormatted))
 
 	redisFormatted := []FormattedOrder{}
 	if s.activeOrdersReader != nil {
+		log.Printf("getAll: redis fetch start tenant=%d", f.TenantID)
 		redisFormatted, err = s.activeOrdersReader.GetFormattedActiveOrders(ctx, f.TenantID)
 		if err != nil {
 			return GetAllOrdersResult{}, err
 		}
+		log.Printf("getAll: redis fetch done count=%d", len(redisFormatted))
 	}
 
 	allOrders := make([]FormattedOrder, 0, len(mysqlFormatted)+len(redisFormatted))
@@ -43,21 +51,26 @@ func (s *service) GetAllOrders(ctx context.Context, f GetAllOrdersFilter) (GetAl
 			allOrders = append(allOrders, value)
 		}
 	}
+	log.Printf("getAll: merged filtered count=%d", len(allOrders))
 
 	sortFormattedOrders(allOrders, f.SortField, f.SortOrder)
+	log.Printf("getAll: sort done field=%q dir=%q", f.SortField, f.SortOrder)
 
 	totalCount := int64(len(allOrders))
 	pagedOrders := paginateFormattedOrders(allOrders, f.Page, f.PageSize)
+	log.Printf("getAll: pagination done total=%d pageCount=%d", totalCount, len(pagedOrders))
 
 	orderIDs := make([]int64, 0, len(pagedOrders))
 	for _, value := range pagedOrders {
 		orderIDs = append(orderIDs, value.OrderID)
 	}
 
+	log.Printf("getAll: options fetch start count=%d", len(orderIDs))
 	optionsMap, err := s.optionsReader.GetOptionsForOrders(ctx, orderIDs)
 	if err != nil {
 		return GetAllOrdersResult{}, err
 	}
+	log.Printf("getAll: options fetch done count=%d", len(optionsMap))
 
 	for i := range pagedOrders {
 		pagedOrders[i].Options = optionsMap[pagedOrders[i].OrderID]
@@ -72,6 +85,7 @@ func (s *service) GetAllOrders(ctx context.Context, f GetAllOrdersFilter) (GetAl
 	if err != nil {
 		return GetAllOrdersResult{}, err
 	}
+	log.Printf("getAll: prepare orders done count=%d", len(prepared))
 
 	return GetAllOrdersResult{
 		OrderTotalCount: totalCount,

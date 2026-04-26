@@ -10,7 +10,6 @@ import (
 	legacyaddress "orders-service/internal/legacy/address"
 	"orders-service/internal/legacy/phpdata"
 	"strconv"
-	"strings"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -79,12 +78,12 @@ func (r *ActiveOrdersRepository) GetFormattedActiveOrders(
 	for _, raw := range values {
 		payload, err := maybeGunzip([]byte(raw))
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("active orders gunzip: %w", err)
 		}
 
 		value, err := phpdata.Unmarshal(payload)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("active orders phpdata unmarshal: %w", err)
 		}
 
 		orderData, ok := value.(map[string]any)
@@ -92,7 +91,10 @@ func (r *ActiveOrdersRepository) GetFormattedActiveOrders(
 			continue
 		}
 
-		formatted, ok := r.mapActiveOrder(orderData)
+		formatted, ok, err := r.mapActiveOrder(orderData)
+		if err != nil {
+			return nil, err
+		}
 		if !ok {
 			continue
 		}
@@ -102,10 +104,10 @@ func (r *ActiveOrdersRepository) GetFormattedActiveOrders(
 	return result, nil
 }
 
-func (r *ActiveOrdersRepository) mapActiveOrder(value map[string]any) (order.FormattedOrder, bool) {
+func (r *ActiveOrdersRepository) mapActiveOrder(value map[string]any) (order.FormattedOrder, bool, error) {
 	orderID, ok := phpdata.CoerceInt64(value["order_id"])
 	if !ok {
-		return order.FormattedOrder{}, false
+		return order.FormattedOrder{}, false, nil
 	}
 
 	orderTime, _ := phpdata.CoerceInt64(value["order_time"])
@@ -122,7 +124,10 @@ func (r *ActiveOrdersRepository) mapActiveOrder(value map[string]any) (order.For
 	unitQuantity := coerceOptionalFloat64(value["unit_quantity"])
 	timeToClient := coerceOptionalInt64(value["time_to_client"])
 
-	addresses := r.parseAddressValue(value["address"])
+	addresses, err := r.parseAddressValue(value["address"], orderID)
+	if err != nil {
+		return order.FormattedOrder{}, false, err
+	}
 
 	statusStatusID, _ := phpdata.CoerceInt64(value["status_status_id"])
 	if statusStatusID == 0 {
@@ -227,23 +232,21 @@ func (r *ActiveOrdersRepository) mapActiveOrder(value map[string]any) (order.For
 		},
 	}
 
-	return formatted, true
+	return formatted, true, nil
 }
 
-func (r *ActiveOrdersRepository) parseAddressValue(value any) []order.AddressView {
+func (r *ActiveOrdersRepository) parseAddressValue(value any, orderID int64) ([]order.AddressView, error) {
 	switch raw := value.(type) {
 	case string:
 		addresses, err := r.parser.ParseAddress(raw)
 		if err != nil {
-			return nil
+			return nil, fmt.Errorf("active order %d parse address string: %w", orderID, err)
 		}
-		return addresses
+		return addresses, nil
 	case map[string]any:
-		var builder strings.Builder
-		_ = builder
-		return mapAddressMap(raw)
+		return mapAddressMap(raw), nil
 	default:
-		return nil
+		return nil, nil
 	}
 }
 

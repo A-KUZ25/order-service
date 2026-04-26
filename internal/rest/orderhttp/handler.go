@@ -139,6 +139,7 @@ func (h *Handler) AllOrders(w http.ResponseWriter, r *http.Request) {
 		ShopIDs:      req.ShopIDs,
 	})
 	if err != nil {
+		log.Printf("all orders error: %+v", err)
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
