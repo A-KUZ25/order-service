@@ -169,10 +169,11 @@ func matchesSearchStatus(statusID int64, searchStatus string) bool {
 	case "new":
 		return GetCategory(statusID) == "new"
 	case "works":
-		return GetCategory(statusID) == "works"
+		category := GetCategory(statusID)
+		return category == "works" || category == "pre_order"
 	case "active":
 		category := GetCategory(statusID)
-		return category == "new" || category == "works"
+		return category == "new" || category == "works" || category == "pre_order"
 	case "completed":
 		return GetCategory(statusID) == "completed"
 	case "rejected":
@@ -200,34 +201,20 @@ func shouldFetchRedisForGetAll(searchStatus string) bool {
 }
 
 func shouldIncludeRedisOrderForGetAll(o FormattedOrder, searchStatus string) bool {
-	switch normalizeGetAllSearchStatus(searchStatus) {
-	case "all":
-		return GetCategory(o.StatusID) != "pre_order"
-	default:
-		return matchesSearchStatus(o.StatusID, searchStatus)
-	}
+	return matchesSearchStatus(o.StatusID, searchStatus)
 }
 
 func mergeGetAllOrders(mysqlFormatted, redisFormatted []FormattedOrder, f GetAllOrdersFilter) []FormattedOrder {
 	allOrders := make([]FormattedOrder, 0, len(mysqlFormatted)+len(redisFormatted))
-	seen := make(map[int64]struct{}, len(mysqlFormatted)+len(redisFormatted))
-
-	appendUnique := func(value FormattedOrder) {
-		if _, ok := seen[value.OrderID]; ok {
-			return
-		}
-		seen[value.OrderID] = struct{}{}
-		allOrders = append(allOrders, value)
-	}
 
 	for _, value := range mysqlFormatted {
 		if matchesGetAllFilter(value, f) {
-			appendUnique(value)
+			allOrders = append(allOrders, value)
 		}
 	}
 	for _, value := range redisFormatted {
 		if shouldIncludeRedisOrderForGetAll(value, f.SearchStatus) && matchesGetAllFilter(value, f) {
-			appendUnique(value)
+			allOrders = append(allOrders, value)
 		}
 	}
 

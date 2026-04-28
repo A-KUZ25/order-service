@@ -923,15 +923,15 @@ func TestGetCategoryAndDeviceName(t *testing.T) {
 	require.Equal(t, "", GetDeviceName("UNKNOWN"))
 }
 
-func TestMatchesSearchStatus_ExcludesPreOrdersFromWorksAndActive(t *testing.T) {
-	require.False(t, matchesSearchStatus(6, "works"))
-	require.False(t, matchesSearchStatus(6, "active"))
+func TestMatchesSearchStatus_IncludesPreOrdersForWorksAndActive(t *testing.T) {
+	require.True(t, matchesSearchStatus(6, "works"))
+	require.True(t, matchesSearchStatus(6, "active"))
 	require.True(t, matchesSearchStatus(6, "pre_order"))
 	require.True(t, matchesSearchStatus(29, "works"))
 	require.True(t, matchesSearchStatus(1, "active"))
 }
 
-func TestMergeGetAllOrders_ExcludesRedisPreOrdersAndDeduplicates(t *testing.T) {
+func TestMergeGetAllOrders_KeepsPreOrdersAndDuplicatesForCountParity(t *testing.T) {
 	filter := GetAllOrdersFilter{
 		SearchStatus: "all",
 	}
@@ -947,9 +947,11 @@ func TestMergeGetAllOrders_ExcludesRedisPreOrdersAndDeduplicates(t *testing.T) {
 
 	merged := mergeGetAllOrders(mysqlFormatted, redisFormatted, filter)
 
-	require.Len(t, merged, 2)
+	require.Len(t, merged, 4)
 	require.Equal(t, int64(1), merged[0].OrderID)
 	require.Equal(t, int64(2), merged[1].OrderID)
+	require.Equal(t, int64(1), merged[2].OrderID)
+	require.Equal(t, int64(3), merged[3].OrderID)
 }
 
 func TestMatchesAttribute_ClientUsesClientFields(t *testing.T) {
