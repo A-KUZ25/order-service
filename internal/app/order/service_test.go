@@ -228,6 +228,20 @@ func (s stubShowOrderCodeProvider) ShouldShowOrderCode(
 	return s.shouldFunc(ctx, tenantID, cityID, positionID)
 }
 
+type stubActiveOrdersReader struct {
+	getFunc func(ctx context.Context, tenantID int64) ([]FormattedOrder, error)
+}
+
+func (s stubActiveOrdersReader) GetFormattedActiveOrders(
+	ctx context.Context,
+	tenantID int64,
+) ([]FormattedOrder, error) {
+	if s.getFunc == nil {
+		return nil, nil
+	}
+	return s.getFunc(ctx, tenantID)
+}
+
 type testOrderViewAssembler struct {
 	waitingTimeProvider WaitingTimeProvider
 	statusTranslator    StatusTranslator
@@ -907,6 +921,91 @@ func TestGetCategoryAndDeviceName(t *testing.T) {
 	require.Equal(t, "Android", GetDeviceName(DeviceAndroid))
 	require.Equal(t, "Диспетчер", GetDeviceName(DeviceDispatcher))
 	require.Equal(t, "", GetDeviceName("UNKNOWN"))
+}
+
+func TestMatchesSearchStatus_ExcludesPreOrdersFromWorksAndActive(t *testing.T) {
+	require.False(t, matchesSearchStatus(6, "works"))
+	require.False(t, matchesSearchStatus(6, "active"))
+	require.True(t, matchesSearchStatus(6, "pre_order"))
+	require.True(t, matchesSearchStatus(29, "works"))
+	require.True(t, matchesSearchStatus(1, "active"))
+}
+
+func TestMergeGetAllOrders_ExcludesRedisPreOrdersAndDeduplicates(t *testing.T) {
+	filter := GetAllOrdersFilter{
+		SearchStatus: "all",
+	}
+
+	mysqlFormatted := []FormattedOrder{
+		{OrderID: 1, StatusID: 29},
+		{OrderID: 2, StatusID: 37},
+	}
+	redisFormatted := []FormattedOrder{
+		{OrderID: 1, StatusID: 29},
+		{OrderID: 3, StatusID: 6},
+	}
+
+	merged := mergeGetAllOrders(mysqlFormatted, redisFormatted, filter)
+
+	require.Len(t, merged, 2)
+	require.Equal(t, int64(1), merged[0].OrderID)
+	require.Equal(t, int64(2), merged[1].OrderID)
+}
+
+func TestGetAllOrders_SkipsMySQLForPreOrder(t *testing.T) {
+	ctx := context.Background()
+	mysqlCalled := false
+	repo := stubRepository{
+		fetchAllOrdersForGetAllFunc: func(ctx context.Context, f GetAllOrdersFilter) ([]FullOrder, error) {
+			mysqlCalled = true
+			return []FullOrder{{OrderID: 10}}, nil
+		},
+		getOptionsForOrdersFunc: func(ctx context.Context, orderIDs []int64) (map[int64][]OptionDTO, error) {
+			return map[int64][]OptionDTO{}, nil
+		},
+	}
+	svc := &service{
+		allOrdersReader:    repo,
+		optionsReader:      repo,
+		statusChangeReader: repo,
+		activeOrdersReader: stubActiveOrdersReader{getFunc: func(ctx context.Context, tenantID int64) ([]FormattedOrder, error) {
+			return []FormattedOrder{{
+				OrderID:     11,
+				TenantID:    tenantID,
+				CityID:      26068,
+				StatusID:    6,
+				OrderTime:   1777409100,
+				OrderNumber: 1258182,
+				Status: StatusDTO{
+					StatusID: 6,
+					Name:     "New pre-order",
+				},
+				Client: ClientDTO{
+					ClientID: 1,
+				},
+			}}, nil
+		}},
+		assembler: newTestOrderViewAssembler(nil, nil, nil),
+	}
+
+	date := "2026-04-28"
+	result, err := svc.GetAllOrders(ctx, GetAllOrdersFilter{
+		BaseFilter: BaseFilter{
+			TenantID: 68,
+			CityIDs:  []int64{26068},
+			Language: "ru",
+			Date:     &date,
+		},
+		Page:         0,
+		PageSize:     50,
+		SearchStatus: "pre_order",
+	})
+
+	require.NoError(t, err)
+	require.False(t, mysqlCalled)
+	require.Equal(t, int64(1), result.OrderTotalCount)
+	require.Len(t, result.Orders, 1)
+	require.Equal(t, int64(11), result.Orders[0].ID)
 }
 
 func requireStatusSet(got, expected []int64) bool {

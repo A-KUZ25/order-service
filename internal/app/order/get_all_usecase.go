@@ -10,12 +10,18 @@ import (
 )
 
 func (s *service) GetAllOrders(ctx context.Context, f GetAllOrdersFilter) (GetAllOrdersResult, error) {
-	log.Printf("getAll: mysql fetch start tenant=%d searchStatus=%q page=%d pageSize=%d", f.TenantID, f.SearchStatus, f.Page, f.PageSize)
-	mysqlOrders, err := s.allOrdersReader.FetchAllOrdersForGetAll(ctx, f)
-	if err != nil {
-		return GetAllOrdersResult{}, err
+	mysqlOrders := []FullOrder{}
+	var err error
+	if shouldFetchMySQLForGetAll(f.SearchStatus) {
+		log.Printf("getAll: mysql fetch start tenant=%d searchStatus=%q page=%d pageSize=%d", f.TenantID, f.SearchStatus, f.Page, f.PageSize)
+		mysqlOrders, err = s.allOrdersReader.FetchAllOrdersForGetAll(ctx, f)
+		if err != nil {
+			return GetAllOrdersResult{}, err
+		}
+		log.Printf("getAll: mysql fetch done count=%d", len(mysqlOrders))
+	} else {
+		log.Printf("getAll: mysql fetch skipped searchStatus=%q", f.SearchStatus)
 	}
-	log.Printf("getAll: mysql fetch done count=%d", len(mysqlOrders))
 
 	addressMap := make(map[int64][]AddressView, len(mysqlOrders))
 	if s.addressResolver != nil {
@@ -31,26 +37,18 @@ func (s *service) GetAllOrders(ctx context.Context, f GetAllOrdersFilter) (GetAl
 	log.Printf("getAll: mysql formatted done count=%d", len(mysqlFormatted))
 
 	redisFormatted := []FormattedOrder{}
-	if s.activeOrdersReader != nil {
+	if s.activeOrdersReader != nil && shouldFetchRedisForGetAll(f.SearchStatus) {
 		log.Printf("getAll: redis fetch start tenant=%d", f.TenantID)
 		redisFormatted, err = s.activeOrdersReader.GetFormattedActiveOrders(ctx, f.TenantID)
 		if err != nil {
 			return GetAllOrdersResult{}, err
 		}
 		log.Printf("getAll: redis fetch done count=%d", len(redisFormatted))
+	} else {
+		log.Printf("getAll: redis fetch skipped searchStatus=%q", f.SearchStatus)
 	}
 
-	allOrders := make([]FormattedOrder, 0, len(mysqlFormatted)+len(redisFormatted))
-	for _, value := range mysqlFormatted {
-		if matchesGetAllFilter(value, f) {
-			allOrders = append(allOrders, value)
-		}
-	}
-	for _, value := range redisFormatted {
-		if matchesGetAllFilter(value, f) {
-			allOrders = append(allOrders, value)
-		}
-	}
+	allOrders := mergeGetAllOrders(mysqlFormatted, redisFormatted, f)
 	log.Printf("getAll: merged filtered count=%d", len(allOrders))
 
 	sortFormattedOrders(allOrders, f.SortField, f.SortOrder)
@@ -171,11 +169,10 @@ func matchesSearchStatus(statusID int64, searchStatus string) bool {
 	case "new":
 		return GetCategory(statusID) == "new"
 	case "works":
-		category := GetCategory(statusID)
-		return category == "works" || category == "pre_order"
+		return GetCategory(statusID) == "works"
 	case "active":
 		category := GetCategory(statusID)
-		return category == "new" || category == "works" || category == "pre_order"
+		return category == "new" || category == "works"
 	case "completed":
 		return GetCategory(statusID) == "completed"
 	case "rejected":
@@ -187,6 +184,54 @@ func matchesSearchStatus(statusID int64, searchStatus string) bool {
 	default:
 		return GetCategory(statusID) == searchStatus
 	}
+}
+
+func shouldFetchMySQLForGetAll(searchStatus string) bool {
+	return normalizeGetAllSearchStatus(searchStatus) != "pre_order"
+}
+
+func shouldFetchRedisForGetAll(searchStatus string) bool {
+	switch normalizeGetAllSearchStatus(searchStatus) {
+	case "completed", "rejected":
+		return false
+	default:
+		return true
+	}
+}
+
+func shouldIncludeRedisOrderForGetAll(o FormattedOrder, searchStatus string) bool {
+	switch normalizeGetAllSearchStatus(searchStatus) {
+	case "all":
+		return GetCategory(o.StatusID) != "pre_order"
+	default:
+		return matchesSearchStatus(o.StatusID, searchStatus)
+	}
+}
+
+func mergeGetAllOrders(mysqlFormatted, redisFormatted []FormattedOrder, f GetAllOrdersFilter) []FormattedOrder {
+	allOrders := make([]FormattedOrder, 0, len(mysqlFormatted)+len(redisFormatted))
+	seen := make(map[int64]struct{}, len(mysqlFormatted)+len(redisFormatted))
+
+	appendUnique := func(value FormattedOrder) {
+		if _, ok := seen[value.OrderID]; ok {
+			return
+		}
+		seen[value.OrderID] = struct{}{}
+		allOrders = append(allOrders, value)
+	}
+
+	for _, value := range mysqlFormatted {
+		if matchesGetAllFilter(value, f) {
+			appendUnique(value)
+		}
+	}
+	for _, value := range redisFormatted {
+		if shouldIncludeRedisOrderForGetAll(value, f.SearchStatus) && matchesGetAllFilter(value, f) {
+			appendUnique(value)
+		}
+	}
+
+	return allOrders
 }
 
 func matchesDate(orderTime int64, date *string) bool {
@@ -307,12 +352,16 @@ func derefInt64(value *int64) string {
 }
 
 func normalizeGetAllGroup(searchStatus string) string {
-	switch searchStatus {
+	switch normalizeGetAllSearchStatus(searchStatus) {
 	case "completed":
 		return "completed"
 	default:
 		return searchStatus
 	}
+}
+
+func normalizeGetAllSearchStatus(searchStatus string) string {
+	return strings.TrimSpace(strings.ToLower(searchStatus))
 }
 
 func containsInt64(values []int64, target int64) bool {
