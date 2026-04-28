@@ -287,6 +287,10 @@ func matchesAttribute(o FormattedOrder, attribute, search string) bool {
 		return false
 	case "comment":
 		return strings.Contains(strings.ToLower(stringValue(o.Comment)), needle)
+	case "client":
+		return matchesSearchString(o, "client", search)
+	case "worker":
+		return matchesSearchString(o, "worker", search)
 	default:
 		return true
 	}

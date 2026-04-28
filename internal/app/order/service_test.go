@@ -952,6 +952,24 @@ func TestMergeGetAllOrders_ExcludesRedisPreOrdersAndDeduplicates(t *testing.T) {
 	require.Equal(t, int64(2), merged[1].OrderID)
 }
 
+func TestMatchesAttribute_ClientUsesClientFields(t *testing.T) {
+	clientPhone := "79990009999"
+	clientName := "Тест"
+	clientLastName := "Тест"
+
+	o := FormattedOrder{
+		Client: ClientDTO{
+			Phone:    &clientPhone,
+			Name:     &clientName,
+			LastName: &clientLastName,
+		},
+	}
+
+	require.True(t, matchesAttribute(o, "client", "7999"))
+	require.True(t, matchesAttribute(o, "client", "тест"))
+	require.False(t, matchesAttribute(o, "client", "другой"))
+}
+
 func TestGetAllOrders_SkipsMySQLForPreOrder(t *testing.T) {
 	ctx := context.Background()
 	mysqlCalled := false
