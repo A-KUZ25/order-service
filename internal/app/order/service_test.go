@@ -927,6 +927,8 @@ func TestMatchesSearchStatus_IncludesPreOrdersForWorksAndActive(t *testing.T) {
 	require.True(t, matchesSearchStatus(6, "works"))
 	require.True(t, matchesSearchStatus(6, "active"))
 	require.True(t, matchesSearchStatus(6, "pre_order"))
+	require.True(t, matchesSearchStatus(16, "works"))
+	require.True(t, matchesSearchStatus(16, "warning"))
 	require.True(t, matchesSearchStatus(29, "works"))
 	require.True(t, matchesSearchStatus(1, "active"))
 }
@@ -970,6 +972,88 @@ func TestMatchesAttribute_ClientUsesClientFields(t *testing.T) {
 	require.True(t, matchesAttribute(o, "client", "7999"))
 	require.True(t, matchesAttribute(o, "client", "тест"))
 	require.False(t, matchesAttribute(o, "client", "другой"))
+}
+
+func TestMatchesRedisAttribute_IgnoresClientAndWorkerAttributes(t *testing.T) {
+	clientName := "Другой"
+	workerName := "Исполнитель"
+
+	o := FormattedOrder{
+		Client: ClientDTO{Name: &clientName},
+		Worker: WorkerDTO{Name: &workerName},
+	}
+
+	require.True(t, matchesRedisAttribute(o, "client", "Тест"))
+	require.True(t, matchesRedisAttribute(o, "worker", "Тест"))
+}
+
+func TestMergeGetAllOrders_RedisIgnoresClientAttributeWithoutSearchString(t *testing.T) {
+	clientTest := "Тест"
+	clientOther := "Имя"
+
+	filter := GetAllOrdersFilter{
+		SearchStatus: "works",
+		Attributes: []SearchAttribute{
+			{Attribute: "client", SearchString: "Тест"},
+		},
+	}
+
+	mysqlFormatted := []FormattedOrder{
+		{
+			OrderID:  1,
+			StatusID: 36,
+			CityID:   26068,
+			Client:   ClientDTO{Name: &clientTest},
+		},
+	}
+	redisFormatted := []FormattedOrder{
+		{
+			OrderID:  2,
+			StatusID: 6,
+			CityID:   26068,
+			Client:   ClientDTO{Name: &clientOther},
+		},
+	}
+
+	merged := mergeGetAllOrders(mysqlFormatted, redisFormatted, filter)
+
+	require.Len(t, merged, 2)
+	require.Equal(t, int64(1), merged[0].OrderID)
+	require.Equal(t, int64(2), merged[1].OrderID)
+}
+
+func TestMergeGetAllOrders_RedisClientSearchUsesSearchString(t *testing.T) {
+	clientTest := "Тест"
+	clientOther := "Имя"
+
+	filter := GetAllOrdersFilter{
+		SearchStatus: "works",
+		SearchString: map[string]string{
+			"client": "Тест",
+		},
+	}
+
+	mysqlFormatted := []FormattedOrder{
+		{
+			OrderID:  1,
+			StatusID: 36,
+			CityID:   26068,
+			Client:   ClientDTO{Name: &clientTest},
+		},
+	}
+	redisFormatted := []FormattedOrder{
+		{
+			OrderID:  2,
+			StatusID: 6,
+			CityID:   26068,
+			Client:   ClientDTO{Name: &clientOther},
+		},
+	}
+
+	merged := mergeGetAllOrders(mysqlFormatted, redisFormatted, filter)
+
+	require.Len(t, merged, 1)
+	require.Equal(t, int64(1), merged[0].OrderID)
 }
 
 func TestGetAllOrders_SkipsMySQLForPreOrder(t *testing.T) {

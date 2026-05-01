@@ -27,7 +27,7 @@ var categories = []struct {
 	{
 		Name: "warning",
 		Statuses: toSet([]int64{
-			5, 16, 27, 30, 38, 45, 46, 47, 48, 52, 54, 129,
+			5, 10, 16, 27, 30, 38, 45, 46, 47, 48, 52, 54, 117, 118, 129, 135,
 		}),
 	},
 	{
@@ -47,8 +47,20 @@ var categories = []struct {
 		Statuses: toSet([]int64{
 			39, 40, 41, 42, 43, 44, 45, 46, 47, 48,
 			49, 50, 51, 107, 120, 121, 122, 123, 124, 125, 126,
+			129, 137, 138, 139, 140, 144, 145,
 		}),
 	},
+}
+
+func statusBelongsToGroup(statusID int64, group string) bool {
+	for _, c := range categories {
+		if c.Name != group {
+			continue
+		}
+		_, ok := c.Statuses[statusID]
+		return ok
+	}
+	return false
 }
 
 func GetCategory(statusID int64) string {

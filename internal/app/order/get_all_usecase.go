@@ -133,7 +133,7 @@ func sortFormattedOrders(orders []FormattedOrder, field, direction string) {
 	}
 }
 
-func matchesGetAllFilter(o FormattedOrder, f GetAllOrdersFilter) bool {
+func matchesGetAllMySQLFilter(o FormattedOrder, f GetAllOrdersFilter) bool {
 	if !matchesSearchStatus(o.StatusID, f.SearchStatus) {
 		return false
 	}
@@ -149,7 +149,27 @@ func matchesGetAllFilter(o FormattedOrder, f GetAllOrdersFilter) bool {
 	if !matchesDate(o.OrderTime, f.Date) {
 		return false
 	}
-	if !matchesSearchAttributes(o, f.Attributes) {
+	if !matchesSearchAttributes(o, f.Attributes, matchesAttribute) {
+		return false
+	}
+
+	return true
+}
+
+func matchesGetAllRedisFilter(o FormattedOrder, f GetAllOrdersFilter) bool {
+	if !matchesSearchStatus(o.StatusID, f.SearchStatus) {
+		return false
+	}
+	if len(f.CityIDs) > 0 && !containsInt64(f.CityIDs, o.CityID) {
+		return false
+	}
+	if len(f.Tariffs) > 0 && !containsInt64(f.Tariffs, o.TariffID) {
+		return false
+	}
+	if !matchesDate(o.OrderTime, f.Date) {
+		return false
+	}
+	if !matchesSearchAttributes(o, f.Attributes, matchesRedisAttribute) {
 		return false
 	}
 	if !matchesSearchString(o, "client", f.SearchString["client"]) {
@@ -167,23 +187,23 @@ func matchesSearchStatus(statusID int64, searchStatus string) bool {
 	case "", "all":
 		return true
 	case "new":
-		return GetCategory(statusID) == "new"
+		return statusBelongsToGroup(statusID, "new")
 	case "works":
-		category := GetCategory(statusID)
-		return category == "works" || category == "pre_order"
+		return statusBelongsToGroup(statusID, "works") || statusBelongsToGroup(statusID, "pre_order")
 	case "active":
-		category := GetCategory(statusID)
-		return category == "new" || category == "works" || category == "pre_order"
+		return statusBelongsToGroup(statusID, "new") ||
+			statusBelongsToGroup(statusID, "works") ||
+			statusBelongsToGroup(statusID, "pre_order")
 	case "completed":
-		return GetCategory(statusID) == "completed"
+		return statusBelongsToGroup(statusID, "completed")
 	case "rejected":
-		return GetCategory(statusID) == "rejected"
+		return statusBelongsToGroup(statusID, "rejected")
 	case "warning":
-		return GetCategory(statusID) == "warning"
+		return statusBelongsToGroup(statusID, "warning")
 	case "pre_order":
-		return GetCategory(statusID) == "pre_order"
+		return statusBelongsToGroup(statusID, "pre_order")
 	default:
-		return GetCategory(statusID) == searchStatus
+		return statusBelongsToGroup(statusID, searchStatus)
 	}
 }
 
@@ -208,12 +228,12 @@ func mergeGetAllOrders(mysqlFormatted, redisFormatted []FormattedOrder, f GetAll
 	allOrders := make([]FormattedOrder, 0, len(mysqlFormatted)+len(redisFormatted))
 
 	for _, value := range mysqlFormatted {
-		if matchesGetAllFilter(value, f) {
+		if matchesGetAllMySQLFilter(value, f) {
 			allOrders = append(allOrders, value)
 		}
 	}
 	for _, value := range redisFormatted {
-		if shouldIncludeRedisOrderForGetAll(value, f.SearchStatus) && matchesGetAllFilter(value, f) {
+		if shouldIncludeRedisOrderForGetAll(value, f.SearchStatus) && matchesGetAllRedisFilter(value, f) {
 			allOrders = append(allOrders, value)
 		}
 	}
@@ -236,7 +256,11 @@ func matchesDate(orderTime int64, date *string) bool {
 	return time.Unix(orderTime, 0).UTC().Format("2006-01-02") == *date
 }
 
-func matchesSearchAttributes(o FormattedOrder, attributes []SearchAttribute) bool {
+func matchesSearchAttributes(
+	o FormattedOrder,
+	attributes []SearchAttribute,
+	matcher func(FormattedOrder, string, string) bool,
+) bool {
 	for _, attribute := range attributes {
 		search := strings.TrimSpace(attribute.SearchString)
 		if search == "" {
@@ -245,7 +269,7 @@ func matchesSearchAttributes(o FormattedOrder, attributes []SearchAttribute) boo
 
 		matched := true
 		for _, part := range strings.Fields(search) {
-			if !matchesAttribute(o, attribute.Attribute, part) {
+			if !matcher(o, attribute.Attribute, part) {
 				matched = false
 				break
 			}
@@ -256,6 +280,15 @@ func matchesSearchAttributes(o FormattedOrder, attributes []SearchAttribute) boo
 	}
 
 	return true
+}
+
+func matchesRedisAttribute(o FormattedOrder, attribute, search string) bool {
+	switch attribute {
+	case "number", "address", "comment":
+		return matchesAttribute(o, attribute, search)
+	default:
+		return true
+	}
 }
 
 func matchesAttribute(o FormattedOrder, attribute, search string) bool {
