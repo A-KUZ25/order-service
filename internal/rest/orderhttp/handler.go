@@ -2,11 +2,11 @@ package orderhttp
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
 	"time"
 
 	"orders-service/internal/app/order"
+	"orders-service/internal/logging"
 
 	"golang.org/x/sync/errgroup"
 )
@@ -67,7 +67,7 @@ func (h *Handler) Orders(w http.ResponseWriter, r *http.Request) {
 		totalCount = count
 		prepared = p
 
-		log.Println("Orders branch took:", time.Since(t0))
+		logging.Info(gctx, "orders branch done", "duration_ms", time.Since(t0).Milliseconds())
 		return nil
 	})
 
@@ -82,7 +82,7 @@ func (h *Handler) Orders(w http.ResponseWriter, r *http.Request) {
 
 		tabs = res
 
-		log.Println("Tabs branch took:", time.Since(t0))
+		logging.Info(gctx, "tabs branch done", "duration_ms", time.Since(t0).Milliseconds())
 		return nil
 	})
 
@@ -93,7 +93,7 @@ func (h *Handler) Orders(w http.ResponseWriter, r *http.Request) {
 
 	resp := buildOrdersResponse(totalCount, pageSize, tabs, prepared)
 
-	log.Println("Execution Orders took:", time.Since(start))
+	logging.Info(ctx, "orders request done", "duration_ms", time.Since(start).Milliseconds())
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -139,7 +139,7 @@ func (h *Handler) AllOrders(w http.ResponseWriter, r *http.Request) {
 		ShopIDs:      req.ShopIDs,
 	})
 	if err != nil {
-		log.Printf("all orders error: %+v", err)
+		logging.Error(r.Context(), "all orders failed", err)
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}

@@ -2,13 +2,13 @@ package main
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"orders-service/internal/app/order"
 	"orders-service/internal/app/orderformat"
 	"orders-service/internal/app/orderview"
 	"orders-service/internal/db"
 	"orders-service/internal/legacy/address"
+	"orders-service/internal/logging"
 	"orders-service/internal/repository/mysql"
 	"orders-service/internal/repository/redisactive"
 	"orders-service/internal/rest/orderhttp"
@@ -23,37 +23,41 @@ import (
 
 func main() {
 	_ = godotenv.Load()
+	logging.Init("orders-service")
 
 	//todo нет защиты от sql инъекций в фильтре
 	mysqlDB, err := db.NewMySQL()
 	if err != nil {
-		log.Fatalf("mysql init error: %v", err)
+		logging.Error(context.Background(), "mysql init error", err)
+		os.Exit(1)
 	}
 
 	defer func() {
 		if err := mysqlDB.Close(); err != nil {
-			log.Printf("error closing db: %v", err)
+			logging.Error(context.Background(), "error closing db", err)
 		} else {
-			log.Println("db closed")
+			logging.Info(context.Background(), "db closed")
 		}
 	}()
 
 	redisClient, err := db.NewRedisActiveOrders()
 	if err != nil {
-		log.Fatalf("redis init error: %v", err)
+		logging.Error(context.Background(), "redis init error", err)
+		os.Exit(1)
 	}
 
 	defer func() {
 		if err := redisClient.Close(); err != nil {
-			log.Printf("error closing redis: %v", err)
+			logging.Error(context.Background(), "error closing redis", err)
 		} else {
-			log.Println("redis closed")
+			logging.Info(context.Background(), "redis closed")
 		}
 	}()
 
 	repo, err := mysql.NewOrdersRepository(mysqlDB)
 	if err != nil {
-		log.Fatalf("Repository init error: %v", err)
+		logging.Error(context.Background(), "repository init error", err)
+		os.Exit(1)
 	}
 	service := order.NewService(
 		repo,
@@ -81,7 +85,7 @@ func main() {
 
 	serverErrCh := make(chan error, 1)
 	go func() {
-		log.Printf("server started at :%s\n", port)
+		logging.Info(context.Background(), "server started", "port", port)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			serverErrCh <- err
 		}
@@ -93,10 +97,10 @@ func main() {
 
 	select {
 	case sig := <-quit:
-		log.Printf("shutdown signal received: %s", sig.String())
+		logging.Info(context.Background(), "shutdown signal received", "signal", sig.String())
 	case err := <-serverErrCh:
 		if err != nil {
-			log.Printf("server error: %v", err)
+			logging.Error(context.Background(), "server error", err)
 		}
 	}
 
@@ -104,12 +108,12 @@ func main() {
 	defer cancel()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Printf("graceful shutdown failed: %v", err)
+		logging.Error(context.Background(), "graceful shutdown failed", err)
 		if err := srv.Close(); err != nil {
-			log.Printf("server close failed: %v", err)
+			logging.Error(context.Background(), "server close failed", err)
 		}
 	} else {
-		log.Println("server shutdown gracefully")
+		logging.Info(context.Background(), "server shutdown gracefully")
 	}
 
 }
