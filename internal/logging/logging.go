@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"log/syslog"
 	"os"
 	"strings"
@@ -19,14 +18,24 @@ const requestIDKey contextKey = "request_id"
 var defaultLogger = newLogger("orders-service")
 
 type logger struct {
-	service string
-	stdout  bool
-	syslog  *syslog.Writer
-	mu      sync.Mutex
+	service       string
+	target        string
+	identity      string
+	stdout        bool
+	syslog        *syslog.Writer
+	syslogInitErr error
+	mu            sync.Mutex
 }
 
 func Init(service string) {
 	defaultLogger = newLogger(service)
+	Info(context.Background(), "logging initialized",
+		"log_target", defaultLogger.target,
+		"stdout_enabled", defaultLogger.stdout,
+		"syslog_enabled", defaultLogger.syslog != nil,
+		"syslog_identity", defaultLogger.identity,
+		"syslog_error", errorString(defaultLogger.syslogInitErr),
+	)
 }
 
 func newLogger(service string) *logger {
@@ -40,18 +49,19 @@ func newLogger(service string) *logger {
 	}
 
 	l := &logger{
-		service: service,
-		stdout:  target == "stdout" || target == "both",
+		service:  service,
+		target:   target,
+		stdout:   target == "stdout" || target == "both",
+		identity: strings.TrimSpace(os.Getenv("SYSLOG_IDENTITY")),
 	}
 
 	if target == "syslog" || target == "both" {
-		identity := strings.TrimSpace(os.Getenv("SYSLOG_IDENTITY"))
-		if identity == "" {
-			identity = service
+		if l.identity == "" {
+			l.identity = service
 		}
-		writer, err := syslog.New(syslog.LOG_INFO|syslog.LOG_USER, identity)
+		writer, err := syslog.New(syslog.LOG_INFO|syslog.LOG_USER, l.identity)
 		if err != nil {
-			log.Printf("syslog init failed: %v", err)
+			l.syslogInitErr = err
 			l.stdout = true
 		} else {
 			l.syslog = writer
@@ -59,6 +69,13 @@ func newLogger(service string) *logger {
 	}
 
 	return l
+}
+
+func errorString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 func WithRequestID(ctx context.Context, requestID string) context.Context {
