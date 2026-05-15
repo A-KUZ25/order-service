@@ -213,7 +213,7 @@ func shouldFetchMySQLForGetAll(searchStatus string) bool {
 
 func shouldFetchRedisForGetAll(searchStatus string) bool {
 	switch normalizeGetAllSearchStatus(searchStatus) {
-	case "completed", "rejected":
+	case "", "all", "completed", "rejected":
 		return false
 	default:
 		return true
@@ -221,6 +221,9 @@ func shouldFetchRedisForGetAll(searchStatus string) bool {
 }
 
 func shouldIncludeRedisOrderForGetAll(o FormattedOrder, searchStatus string) bool {
+	if !shouldFetchRedisForGetAll(searchStatus) {
+		return false
+	}
 	return matchesSearchStatus(o.StatusID, searchStatus)
 }
 

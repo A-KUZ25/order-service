@@ -933,7 +933,7 @@ func TestMatchesSearchStatus_IncludesPreOrdersForWorksAndActive(t *testing.T) {
 	require.True(t, matchesSearchStatus(1, "active"))
 }
 
-func TestMergeGetAllOrders_KeepsPreOrdersAndDuplicatesForCountParity(t *testing.T) {
+func TestMergeGetAllOrders_SkipsRedisForAllStatus(t *testing.T) {
 	filter := GetAllOrdersFilter{
 		SearchStatus: "all",
 	}
@@ -949,11 +949,30 @@ func TestMergeGetAllOrders_KeepsPreOrdersAndDuplicatesForCountParity(t *testing.
 
 	merged := mergeGetAllOrders(mysqlFormatted, redisFormatted, filter)
 
-	require.Len(t, merged, 4)
+	require.Len(t, merged, 2)
 	require.Equal(t, int64(1), merged[0].OrderID)
 	require.Equal(t, int64(2), merged[1].OrderID)
-	require.Equal(t, int64(1), merged[2].OrderID)
-	require.Equal(t, int64(3), merged[3].OrderID)
+}
+
+func TestMergeGetAllOrders_KeepsRedisDuplicatesForWorksCountParity(t *testing.T) {
+	filter := GetAllOrdersFilter{
+		SearchStatus: "works",
+	}
+
+	mysqlFormatted := []FormattedOrder{
+		{OrderID: 1, StatusID: 36},
+	}
+	redisFormatted := []FormattedOrder{
+		{OrderID: 1, StatusID: 36},
+		{OrderID: 3, StatusID: 6},
+	}
+
+	merged := mergeGetAllOrders(mysqlFormatted, redisFormatted, filter)
+
+	require.Len(t, merged, 3)
+	require.Equal(t, int64(1), merged[0].OrderID)
+	require.Equal(t, int64(1), merged[1].OrderID)
+	require.Equal(t, int64(3), merged[2].OrderID)
 }
 
 func TestMatchesAttribute_ClientUsesClientFields(t *testing.T) {
