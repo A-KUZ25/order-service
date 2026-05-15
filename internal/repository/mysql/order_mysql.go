@@ -4,8 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
 	"orders-service/internal/app/order"
+	"orders-service/internal/logging"
 	"strings"
 	"time"
 )
@@ -126,14 +126,17 @@ func (r *OrdersRepository) executeQuery(
 	args []any,
 ) ([]int64, error) {
 
-	start := time.Now()
+	totalStarted := time.Now()
+	queryStarted := time.Now()
 	rows, err := r.db.QueryContext(ctx, sql, args...)
+	queryMS := time.Since(queryStarted).Milliseconds()
 	if err != nil {
+		logging.Error(ctx, "mysql id query failed", err, "query_ms", queryMS)
 		return nil, err
 	}
 	defer rows.Close()
-	log.Println("BASE REQUEST TIME:", time.Since(start))
 
+	scanStarted := time.Now()
 	var ids []int64
 	for rows.Next() {
 		var id int64
@@ -142,7 +145,27 @@ func (r *OrdersRepository) executeQuery(
 		}
 		ids = append(ids, id)
 	}
-	return ids, rows.Err()
+	scanMS := time.Since(scanStarted).Milliseconds()
+	totalMS := time.Since(totalStarted).Milliseconds()
+
+	if err := rows.Err(); err != nil {
+		logging.Error(ctx, "mysql id rows failed", err,
+			"query_ms", queryMS,
+			"scan_ms", scanMS,
+			"total_ms", totalMS,
+			"row_count", len(ids),
+		)
+		return nil, err
+	}
+
+	logging.Info(ctx, "mysql id query timings",
+		"query_ms", queryMS,
+		"scan_ms", scanMS,
+		"total_ms", totalMS,
+		"row_count", len(ids),
+	)
+
+	return ids, nil
 }
 
 func formatArg(a any) string {

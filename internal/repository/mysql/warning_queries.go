@@ -2,8 +2,8 @@ package mysql
 
 import (
 	"context"
-	"log"
 	"orders-service/internal/app/order"
+	"orders-service/internal/logging"
 	"strings"
 	"time"
 )
@@ -118,14 +118,25 @@ WHERE ( 1=1
 		sb.WriteString(")\n")
 	}
 
-	start := time.Now()
+	started := time.Now()
 	row := r.db.QueryRowContext(ctx, sb.String(), args...)
-	log.Println("BASE REQUEST TIME:", time.Since(start))
 
 	var cnt int64
 	if err := row.Scan(&cnt); err != nil {
+		logging.Error(ctx, "mysql refresh count failed", err,
+			"duration_ms", time.Since(started).Milliseconds(),
+			"group", f.Group,
+			"warning_ids_count", len(warningIDs),
+		)
 		return 0, err
 	}
+
+	logging.Info(ctx, "mysql refresh count timings",
+		"duration_ms", time.Since(started).Milliseconds(),
+		"count", cnt,
+		"group", f.Group,
+		"warning_ids_count", len(warningIDs),
+	)
 
 	return cnt, nil
 }

@@ -3,8 +3,8 @@ package mysql
 import (
 	"context"
 	"database/sql"
-	"log"
 	"orders-service/internal/app/order"
+	"orders-service/internal/logging"
 	"strings"
 	"time"
 )
@@ -38,14 +38,21 @@ func (r *OrdersRepository) GetOptionsForOrders(
 		WHERE oho.order_id IN (` + strings.Join(placeholders, ",") + `)
 	`
 
-	start := time.Now()
+	totalStarted := time.Now()
+	queryStarted := time.Now()
 	rows, err := r.db.QueryContext(ctx, query, args...)
+	queryMS := time.Since(queryStarted).Milliseconds()
 	if err != nil {
+		logging.Error(ctx, "mysql options query failed", err,
+			"query_ms", queryMS,
+			"order_ids_count", len(orderIDs),
+		)
 		return nil, err
 	}
-	log.Println("BASE REQUEST TIME:", time.Since(start))
 	defer rows.Close()
 
+	scanStarted := time.Now()
+	rowCount := 0
 	for rows.Next() {
 		var (
 			orderID  int64
@@ -63,11 +70,30 @@ func (r *OrdersRepository) GetOptionsForOrders(
 			Name:     name.String,
 			Quantity: quantity.Int64,
 		})
+		rowCount++
 	}
+	scanMS := time.Since(scanStarted).Milliseconds()
+	totalMS := time.Since(totalStarted).Milliseconds()
 
 	if err := rows.Err(); err != nil {
+		logging.Error(ctx, "mysql options rows failed", err,
+			"query_ms", queryMS,
+			"scan_ms", scanMS,
+			"total_ms", totalMS,
+			"order_ids_count", len(orderIDs),
+			"row_count", rowCount,
+		)
 		return nil, err
 	}
+
+	logging.Info(ctx, "mysql options timings",
+		"query_ms", queryMS,
+		"scan_ms", scanMS,
+		"total_ms", totalMS,
+		"order_ids_count", len(orderIDs),
+		"orders_with_options_count", len(result),
+		"row_count", rowCount,
+	)
 
 	return result, nil
 }

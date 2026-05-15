@@ -2,8 +2,8 @@ package mysql
 
 import (
 	"context"
-	"log"
 	"orders-service/internal/app/order"
+	"orders-service/internal/logging"
 	"strings"
 	"time"
 )
@@ -144,14 +144,22 @@ WHERE ( 1=1
 	sb.WriteString(" LIMIT ? OFFSET ?")
 	args = append(args, pageSize, page*pageSize)
 
-	start := time.Now()
+	totalStarted := time.Now()
+	queryStarted := time.Now()
 	rows, err := r.db.QueryContext(ctx, sb.String(), args...)
-	log.Println("BASE REQUEST TIME:", time.Since(start))
+	queryMS := time.Since(queryStarted).Milliseconds()
 	if err != nil {
+		logging.Error(ctx, "mysql refresh fetch query failed", err,
+			"query_ms", queryMS,
+			"group", f.Group,
+			"page", page,
+			"page_size", pageSize,
+		)
 		return nil, err
 	}
 	defer rows.Close()
 
+	scanStarted := time.Now()
 	var result []order.FullOrder
 	for rows.Next() {
 		var o order.FullOrder
@@ -258,10 +266,29 @@ WHERE ( 1=1
 
 		result = append(result, o)
 	}
+	scanMS := time.Since(scanStarted).Milliseconds()
+	totalMS := time.Since(totalStarted).Milliseconds()
 
 	if err = rows.Err(); err != nil {
+		logging.Error(ctx, "mysql refresh fetch rows failed", err,
+			"query_ms", queryMS,
+			"scan_ms", scanMS,
+			"total_ms", totalMS,
+			"row_count", len(result),
+		)
 		return nil, err
 	}
+
+	logging.Info(ctx, "mysql refresh fetch timings",
+		"query_ms", queryMS,
+		"scan_ms", scanMS,
+		"total_ms", totalMS,
+		"row_count", len(result),
+		"group", f.Group,
+		"page", page,
+		"page_size", pageSize,
+		"warning_ids_count", len(warningIDs),
+	)
 
 	return result, nil
 }

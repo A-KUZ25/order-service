@@ -2,7 +2,9 @@ package order
 
 import (
 	"context"
+	"orders-service/internal/logging"
 	"strconv"
+	"time"
 )
 
 func (s *service) MapFullOrderToFormatted(
@@ -167,12 +169,34 @@ func (s *service) GetFormattedOrdersByGroup(
 	f WarningFilter,
 	page, pageSize int,
 ) (int64, []FormattedOrder, error) {
+	totalStarted := time.Now()
+	var getOrdersMS int64
+	var addressResolveMS int64
+	var optionsFetchMS int64
+	var mapMS int64
+
+	started := time.Now()
 	count, orders, err := s.GetOrdersByGroup(ctx, f, page, pageSize)
+	getOrdersMS = time.Since(started).Milliseconds()
 	if err != nil {
+		logging.Error(ctx, "refresh get formatted orders fetch failed", err, "duration_ms", getOrdersMS)
 		return 0, nil, err
 	}
 
 	if len(orders) == 0 {
+		logging.Info(ctx, "refresh get formatted orders timings",
+			"total_ms", time.Since(totalStarted).Milliseconds(),
+			"get_orders_ms", getOrdersMS,
+			"address_resolve_ms", addressResolveMS,
+			"options_fetch_ms", optionsFetchMS,
+			"map_ms", mapMS,
+			"group", f.BaseFilter.Group,
+			"page", page,
+			"page_size", pageSize,
+			"total_count", count,
+			"orders_count", len(orders),
+			"formatted_count", 0,
+		)
 		return count, []FormattedOrder{}, nil
 	}
 
@@ -183,17 +207,43 @@ func (s *service) GetFormattedOrdersByGroup(
 
 	addressMap := make(map[int64][]AddressView, len(orders))
 	if s.addressResolver != nil {
+		started = time.Now()
 		resolved, err := s.addressResolver.ResolveAddresses(orders)
+		addressResolveMS = time.Since(started).Milliseconds()
 		if err != nil {
+			logging.Error(ctx, "refresh address resolve failed", err, "duration_ms", addressResolveMS)
 			return 0, nil, err
 		}
 		addressMap = resolved
 	}
 
+	started = time.Now()
 	optionsMap, err := s.optionsReader.GetOptionsForOrders(ctx, orderIDs)
+	optionsFetchMS = time.Since(started).Milliseconds()
 	if err != nil {
+		logging.Error(ctx, "refresh options fetch failed", err, "duration_ms", optionsFetchMS)
 		return 0, nil, err
 	}
 
-	return count, s.MapOrders(orders, optionsMap, addressMap), nil
+	started = time.Now()
+	formatted := s.MapOrders(orders, optionsMap, addressMap)
+	mapMS = time.Since(started).Milliseconds()
+
+	logging.Info(ctx, "refresh get formatted orders timings",
+		"total_ms", time.Since(totalStarted).Milliseconds(),
+		"get_orders_ms", getOrdersMS,
+		"address_resolve_ms", addressResolveMS,
+		"options_fetch_ms", optionsFetchMS,
+		"map_ms", mapMS,
+		"group", f.BaseFilter.Group,
+		"page", page,
+		"page_size", pageSize,
+		"total_count", count,
+		"orders_count", len(orders),
+		"formatted_count", len(formatted),
+		"address_orders_count", len(addressMap),
+		"options_orders_count", len(optionsMap),
+	)
+
+	return count, formatted, nil
 }
