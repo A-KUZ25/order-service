@@ -217,7 +217,9 @@ func (a *Assembler) getWorkerWaitingTimes(
 }
 
 func needsWorkerWaitingTime(o order.FormattedOrder) bool {
-	return o.WorkerID != nil || o.Worker.WorkerID > 0
+	const workerWaitingStatusID int64 = 26
+
+	return o.StatusID == workerWaitingStatusID && (o.WorkerID != nil || o.Worker.WorkerID > 0)
 }
 
 func (a *Assembler) hasBulkWaitingTimeProvider() bool {
