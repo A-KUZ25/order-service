@@ -181,6 +181,9 @@ func (a *Assembler) getWorkerWaitingTimes(
 	bulkProvider, ok := a.waitingTimeProvider.(order.BulkWaitingTimeProvider)
 	if !ok {
 		for _, o := range orders {
+			if !needsWorkerWaitingTime(o) {
+				continue
+			}
 			waitTime, err := a.waitingTimeProvider.GetWorkerWaitingTime(ctx, o.TenantID, o.OrderID)
 			if err != nil {
 				return nil, err
@@ -194,6 +197,9 @@ func (a *Assembler) getWorkerWaitingTimes(
 
 	ordersByTenant := make(map[int64][]int64)
 	for _, o := range orders {
+		if !needsWorkerWaitingTime(o) {
+			continue
+		}
 		ordersByTenant[o.TenantID] = append(ordersByTenant[o.TenantID], o.OrderID)
 	}
 
@@ -208,6 +214,10 @@ func (a *Assembler) getWorkerWaitingTimes(
 	}
 
 	return result, nil
+}
+
+func needsWorkerWaitingTime(o order.FormattedOrder) bool {
+	return o.WorkerID != nil || o.Worker.WorkerID > 0
 }
 
 func (a *Assembler) hasBulkWaitingTimeProvider() bool {

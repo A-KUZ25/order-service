@@ -10,7 +10,9 @@ import (
 	"orders-service/internal/app/order"
 	legacyaddress "orders-service/internal/legacy/address"
 	"orders-service/internal/legacy/phpdata"
+	"orders-service/internal/logging"
 	"strconv"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -61,11 +63,20 @@ func (r *ActiveOrdersRepository) GetWorkerWaitingTimes(
 		fields = append(fields, strconv.FormatInt(orderID, 10))
 	}
 
+	totalStarted := time.Now()
+	hmgetStarted := time.Now()
 	values, err := r.client.HMGet(ctx, strconv.FormatInt(tenantID, 10), fields...).Result()
+	hmgetMS := time.Since(hmgetStarted).Milliseconds()
 	if err != nil {
+		logging.Error(ctx, "redis wait times hmget failed", err,
+			"hmget_ms", hmgetMS,
+			"tenant_id", tenantID,
+			"order_ids_count", len(orderIDs),
+		)
 		return nil, err
 	}
 
+	parseStarted := time.Now()
 	for i, value := range values {
 		if value == nil {
 			continue
@@ -89,6 +100,17 @@ func (r *ActiveOrdersRepository) GetWorkerWaitingTimes(
 			result[orderIDs[i]] = waitTime
 		}
 	}
+	parseMS := time.Since(parseStarted).Milliseconds()
+
+	logging.Info(ctx, "redis wait times timings",
+		"total_ms", time.Since(totalStarted).Milliseconds(),
+		"hmget_ms", hmgetMS,
+		"parse_ms", parseMS,
+		"tenant_id", tenantID,
+		"order_ids_count", len(orderIDs),
+		"values_count", len(values),
+		"wait_times_count", len(result),
+	)
 
 	return result, nil
 }
