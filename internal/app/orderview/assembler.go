@@ -3,6 +3,7 @@ package orderview
 import (
 	"context"
 	"orders-service/internal/app/order"
+	"orders-service/internal/logging"
 	"time"
 )
 
@@ -30,12 +31,59 @@ func (a *Assembler) BuildOrderView(
 	f order.WarningFilter,
 	statusChangeTimes map[order.StatusKey]int64,
 ) (order.OrderView, error) {
-	status, err := a.buildOrderStatusView(ctx, f.BaseFilter.Language, o)
+	waitTime, err := a.getWorkerWaitingTime(ctx, o.TenantID, o.OrderID)
 	if err != nil {
 		return order.OrderView{}, err
 	}
 
-	waitTime, err := a.getWorkerWaitingTime(ctx, o.TenantID, o.OrderID)
+	return a.buildOrderViewWithWaitTime(ctx, o, f, statusChangeTimes, waitTime)
+}
+
+func (a *Assembler) BuildOrderViews(
+	ctx context.Context,
+	orders []order.FormattedOrder,
+	f order.WarningFilter,
+	statusChangeTimes map[order.StatusKey]int64,
+) ([]order.OrderView, error) {
+	totalStarted := time.Now()
+	waitTimesStarted := time.Now()
+	waitTimes, err := a.getWorkerWaitingTimes(ctx, orders)
+	waitTimesMS := time.Since(waitTimesStarted).Milliseconds()
+	if err != nil {
+		return nil, err
+	}
+
+	buildStarted := time.Now()
+	result := make([]order.OrderView, 0, len(orders))
+	for _, o := range orders {
+		prepared, err := a.buildOrderViewWithWaitTime(ctx, o, f, statusChangeTimes, waitTimes[o.OrderID])
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, prepared)
+	}
+	buildMS := time.Since(buildStarted).Milliseconds()
+
+	logging.Info(ctx, "order views assembler timings",
+		"total_ms", time.Since(totalStarted).Milliseconds(),
+		"wait_times_ms", waitTimesMS,
+		"build_loop_ms", buildMS,
+		"orders_count", len(orders),
+		"wait_times_count", len(waitTimes),
+		"bulk_wait_time", a.hasBulkWaitingTimeProvider(),
+	)
+
+	return result, nil
+}
+
+func (a *Assembler) buildOrderViewWithWaitTime(
+	ctx context.Context,
+	o order.FormattedOrder,
+	f order.WarningFilter,
+	statusChangeTimes map[order.StatusKey]int64,
+	waitTime int64,
+) (order.OrderView, error) {
+	status, err := a.buildOrderStatusView(ctx, f.BaseFilter.Language, o)
 	if err != nil {
 		return order.OrderView{}, err
 	}
@@ -119,6 +167,55 @@ func (a *Assembler) getWorkerWaitingTime(
 	}
 
 	return a.waitingTimeProvider.GetWorkerWaitingTime(ctx, tenantID, orderID)
+}
+
+func (a *Assembler) getWorkerWaitingTimes(
+	ctx context.Context,
+	orders []order.FormattedOrder,
+) (map[int64]int64, error) {
+	result := make(map[int64]int64, len(orders))
+	if a.waitingTimeProvider == nil || len(orders) == 0 {
+		return result, nil
+	}
+
+	bulkProvider, ok := a.waitingTimeProvider.(order.BulkWaitingTimeProvider)
+	if !ok {
+		for _, o := range orders {
+			waitTime, err := a.waitingTimeProvider.GetWorkerWaitingTime(ctx, o.TenantID, o.OrderID)
+			if err != nil {
+				return nil, err
+			}
+			if waitTime != 0 {
+				result[o.OrderID] = waitTime
+			}
+		}
+		return result, nil
+	}
+
+	ordersByTenant := make(map[int64][]int64)
+	for _, o := range orders {
+		ordersByTenant[o.TenantID] = append(ordersByTenant[o.TenantID], o.OrderID)
+	}
+
+	for tenantID, orderIDs := range ordersByTenant {
+		waitTimes, err := bulkProvider.GetWorkerWaitingTimes(ctx, tenantID, orderIDs)
+		if err != nil {
+			return nil, err
+		}
+		for orderID, waitTime := range waitTimes {
+			result[orderID] = waitTime
+		}
+	}
+
+	return result, nil
+}
+
+func (a *Assembler) hasBulkWaitingTimeProvider() bool {
+	if a.waitingTimeProvider == nil {
+		return false
+	}
+	_, ok := a.waitingTimeProvider.(order.BulkWaitingTimeProvider)
+	return ok
 }
 
 func (a *Assembler) translateStatus(

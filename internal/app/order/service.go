@@ -114,6 +114,14 @@ type WaitingTimeProvider interface {
 	) (int64, error)
 }
 
+type BulkWaitingTimeProvider interface {
+	GetWorkerWaitingTimes(
+		ctx context.Context,
+		tenantID int64,
+		orderIDs []int64,
+	) (map[int64]int64, error)
+}
+
 type StatusTranslator interface {
 	TranslateStatus(ctx context.Context, language, name string) (string, error)
 }
@@ -132,6 +140,15 @@ type OrderViewAssembler interface {
 		f WarningFilter,
 		statusChangeTimes map[StatusKey]int64,
 	) (OrderView, error)
+}
+
+type OrderViewsAssembler interface {
+	BuildOrderViews(
+		ctx context.Context,
+		orders []FormattedOrder,
+		f WarningFilter,
+		statusChangeTimes map[StatusKey]int64,
+	) ([]OrderView, error)
 }
 
 type ActiveOrdersReader interface {

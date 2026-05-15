@@ -43,6 +43,57 @@ func (r *ActiveOrdersRepository) GetWorkerWaitingTime(
 		return 0, err
 	}
 
+	return parseWorkerWaitingTime(raw)
+}
+
+func (r *ActiveOrdersRepository) GetWorkerWaitingTimes(
+	ctx context.Context,
+	tenantID int64,
+	orderIDs []int64,
+) (map[int64]int64, error) {
+	result := make(map[int64]int64, len(orderIDs))
+	if len(orderIDs) == 0 {
+		return result, nil
+	}
+
+	fields := make([]string, 0, len(orderIDs))
+	for _, orderID := range orderIDs {
+		fields = append(fields, strconv.FormatInt(orderID, 10))
+	}
+
+	values, err := r.client.HMGet(ctx, strconv.FormatInt(tenantID, 10), fields...).Result()
+	if err != nil {
+		return nil, err
+	}
+
+	for i, value := range values {
+		if value == nil {
+			continue
+		}
+
+		var raw []byte
+		switch typed := value.(type) {
+		case string:
+			raw = []byte(typed)
+		case []byte:
+			raw = typed
+		default:
+			continue
+		}
+
+		waitTime, err := parseWorkerWaitingTime(raw)
+		if err != nil {
+			return nil, err
+		}
+		if waitTime != 0 {
+			result[orderIDs[i]] = waitTime
+		}
+	}
+
+	return result, nil
+}
+
+func parseWorkerWaitingTime(raw []byte) (int64, error) {
 	payload, err := maybeGunzip(raw)
 	if err != nil {
 		return 0, err

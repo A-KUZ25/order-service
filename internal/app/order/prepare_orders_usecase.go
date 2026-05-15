@@ -3,6 +3,7 @@ package order
 import (
 	"context"
 	"errors"
+	"orders-service/internal/logging"
 	"time"
 )
 
@@ -19,30 +20,75 @@ func (s *service) PrepareOrdersData(
 	orders []FormattedOrder,
 	f WarningFilter,
 ) ([]OrderView, error) {
-	result := make([]OrderView, 0, len(orders))
+	totalStarted := time.Now()
+	var statusChangeMS int64
+	var buildViewsMS int64
+
 	seen := make(map[int64]struct{}, len(orders))
 	assembler := s.getAssembler()
 	if assembler == nil {
 		return nil, errors.New("order view assembler is not configured")
 	}
 
-	statusChangeTimes, err := s.loadStatusChangeTimes(ctx, orders)
-	if err != nil {
-		return nil, err
-	}
-
+	uniqueOrders := make([]FormattedOrder, 0, len(orders))
 	for _, o := range orders {
 		if _, ok := seen[o.OrderID]; ok {
 			continue
 		}
 		seen[o.OrderID] = struct{}{}
+		uniqueOrders = append(uniqueOrders, o)
+	}
 
+	started := time.Now()
+	statusChangeTimes, err := s.loadStatusChangeTimes(ctx, uniqueOrders)
+	statusChangeMS = time.Since(started).Milliseconds()
+	if err != nil {
+		logging.Error(ctx, "prepare orders status changes failed", err, "duration_ms", statusChangeMS)
+		return nil, err
+	}
+
+	started = time.Now()
+	if batchAssembler, ok := assembler.(OrderViewsAssembler); ok {
+		result, err := batchAssembler.BuildOrderViews(ctx, uniqueOrders, f, statusChangeTimes)
+		buildViewsMS = time.Since(started).Milliseconds()
+		if err != nil {
+			logging.Error(ctx, "prepare orders build views failed", err, "duration_ms", buildViewsMS, "batch", true)
+			return nil, err
+		}
+
+		logging.Info(ctx, "prepare orders timings",
+			"total_ms", time.Since(totalStarted).Milliseconds(),
+			"status_change_ms", statusChangeMS,
+			"build_views_ms", buildViewsMS,
+			"orders_count", len(orders),
+			"unique_orders_count", len(uniqueOrders),
+			"prepared_count", len(result),
+			"batch_assembler", true,
+		)
+		return result, nil
+	}
+
+	result := make([]OrderView, 0, len(uniqueOrders))
+	for _, o := range uniqueOrders {
 		prepared, err := assembler.BuildOrderView(ctx, o, f, statusChangeTimes)
 		if err != nil {
+			buildViewsMS = time.Since(started).Milliseconds()
+			logging.Error(ctx, "prepare orders build views failed", err, "duration_ms", buildViewsMS, "batch", false)
 			return nil, err
 		}
 		result = append(result, prepared)
 	}
+	buildViewsMS = time.Since(started).Milliseconds()
+
+	logging.Info(ctx, "prepare orders timings",
+		"total_ms", time.Since(totalStarted).Milliseconds(),
+		"status_change_ms", statusChangeMS,
+		"build_views_ms", buildViewsMS,
+		"orders_count", len(orders),
+		"unique_orders_count", len(uniqueOrders),
+		"prepared_count", len(result),
+		"batch_assembler", false,
+	)
 
 	return result, nil
 }
