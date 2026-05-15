@@ -92,6 +92,71 @@ func TestGetWorkerWaitingTime(t *testing.T) {
 	})
 }
 
+func TestExtractSerializedWaitTime(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  []byte
+		want int64
+		ok   bool
+	}{
+		{
+			name: "integer",
+			raw:  []byte(`a:1:{s:9:"wait_time";i:5;}`),
+			want: 5,
+			ok:   true,
+		},
+		{
+			name: "string",
+			raw:  []byte(`a:1:{s:9:"wait_time";s:2:"12";}`),
+			want: 12,
+			ok:   true,
+		},
+		{
+			name: "missing",
+			raw:  []byte(`a:1:{s:4:"test";s:2:"ok";}`),
+			ok:   false,
+		},
+		{
+			name: "broken",
+			raw:  []byte(`a:1:{s:9:"wait_time";s:2:"1`),
+			ok:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := extractSerializedWaitTime(tt.raw)
+
+			require.Equal(t, tt.ok, ok)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestGetWorkerWaitingTimes(t *testing.T) {
+	ctx := context.Background()
+	mr := miniredis.RunT(t)
+
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() {
+		_ = client.Close()
+	})
+
+	repo := NewActiveOrdersRepository(client)
+
+	mr.HSet("68", "101", `a:1:{s:9:"wait_time";i:5;}`)
+	mr.HSet("68", "102", string(gzipBytes(t, []byte(`a:1:{s:9:"wait_time";s:2:"12";}`))))
+	mr.HSet("68", "103", `a:1:{s:4:"test";s:2:"ok";}`)
+
+	got, err := repo.GetWorkerWaitingTimes(ctx, 68, []int64{101, 102, 103, 104})
+
+	require.NoError(t, err)
+	require.Equal(t, map[int64]int64{
+		101: 300,
+		102: 720,
+	}, got)
+}
+
 func gzipBytes(t *testing.T, payload []byte) []byte {
 	t.Helper()
 

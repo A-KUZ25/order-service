@@ -121,6 +121,10 @@ func parseWorkerWaitingTime(raw []byte) (int64, error) {
 		return 0, err
 	}
 
+	if waitTime, ok := extractSerializedWaitTime(payload); ok {
+		return waitTime * 60, nil
+	}
+
 	value, err := phpdata.Unmarshal(payload)
 	if err != nil {
 		return 0, err
@@ -137,6 +141,58 @@ func parseWorkerWaitingTime(raw []byte) (int64, error) {
 	}
 
 	return waitTime * 60, nil
+}
+
+func extractSerializedWaitTime(payload []byte) (int64, bool) {
+	const key = `s:9:"wait_time";`
+
+	index := bytes.Index(payload, []byte(key))
+	if index < 0 {
+		return 0, false
+	}
+
+	value := payload[index+len(key):]
+	if len(value) < 3 {
+		return 0, false
+	}
+
+	switch value[0] {
+	case 'i':
+		if value[1] != ':' {
+			return 0, false
+		}
+		end := bytes.IndexByte(value[2:], ';')
+		if end < 0 {
+			return 0, false
+		}
+		waitTime, err := strconv.ParseInt(string(value[2:2+end]), 10, 64)
+		return waitTime, err == nil
+	case 's':
+		if value[1] != ':' {
+			return 0, false
+		}
+		lengthEnd := bytes.IndexByte(value[2:], ':')
+		if lengthEnd < 0 {
+			return 0, false
+		}
+		length, err := strconv.Atoi(string(value[2 : 2+lengthEnd]))
+		if err != nil {
+			return 0, false
+		}
+
+		start := 2 + lengthEnd + 1
+		if len(value) < start+length+3 ||
+			value[start] != '"' ||
+			value[start+length+1] != '"' ||
+			value[start+length+2] != ';' {
+			return 0, false
+		}
+
+		waitTime, err := strconv.ParseInt(string(value[start+1:start+1+length]), 10, 64)
+		return waitTime, err == nil
+	default:
+		return 0, false
+	}
 }
 
 func (r *ActiveOrdersRepository) GetFormattedActiveOrders(
