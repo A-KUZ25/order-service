@@ -2,7 +2,7 @@ package order
 
 import (
 	"context"
-	"log"
+	"orders-service/internal/logging"
 	"sort"
 	"strconv"
 	"strings"
@@ -10,80 +10,129 @@ import (
 )
 
 func (s *service) GetAllOrders(ctx context.Context, f GetAllOrdersFilter) (GetAllOrdersResult, error) {
+	totalStarted := time.Now()
+	var mysqlFetchMS int64
+	var addressResolveMS int64
+	var mysqlMapMS int64
+	var redisFetchMS int64
+	var mergeFilterMS int64
+	var sortMS int64
+	var paginationMS int64
+	var optionsFetchMS int64
+	var optionsAssignMS int64
+	var prepareMS int64
+
 	mysqlOrders := []FullOrder{}
 	var err error
 	if shouldFetchMySQLForGetAll(f.SearchStatus) {
-		log.Printf("getAll: mysql fetch start tenant=%d searchStatus=%q page=%d pageSize=%d", f.TenantID, f.SearchStatus, f.Page, f.PageSize)
+		started := time.Now()
 		mysqlOrders, err = s.allOrdersReader.FetchAllOrdersForGetAll(ctx, f)
+		mysqlFetchMS = time.Since(started).Milliseconds()
 		if err != nil {
+			logging.Error(ctx, "getAll mysql fetch failed", err, "duration_ms", mysqlFetchMS)
 			return GetAllOrdersResult{}, err
 		}
-		log.Printf("getAll: mysql fetch done count=%d", len(mysqlOrders))
-	} else {
-		log.Printf("getAll: mysql fetch skipped searchStatus=%q", f.SearchStatus)
 	}
 
 	addressMap := make(map[int64][]AddressView, len(mysqlOrders))
 	if s.addressResolver != nil {
-		log.Printf("getAll: mysql address resolve start count=%d", len(mysqlOrders))
+		started := time.Now()
 		addressMap, err = s.addressResolver.ResolveAddresses(mysqlOrders)
+		addressResolveMS = time.Since(started).Milliseconds()
 		if err != nil {
+			logging.Error(ctx, "getAll address resolve failed", err, "duration_ms", addressResolveMS)
 			return GetAllOrdersResult{}, err
 		}
-		log.Printf("getAll: mysql address resolve done count=%d", len(addressMap))
 	}
 
+	started := time.Now()
 	mysqlFormatted := s.MapOrders(mysqlOrders, map[int64][]OptionDTO{}, addressMap)
-	log.Printf("getAll: mysql formatted done count=%d", len(mysqlFormatted))
+	mysqlMapMS = time.Since(started).Milliseconds()
 
 	redisFormatted := []FormattedOrder{}
 	if s.activeOrdersReader != nil && shouldFetchRedisForGetAll(f.SearchStatus) {
-		log.Printf("getAll: redis fetch start tenant=%d", f.TenantID)
+		started = time.Now()
 		redisFormatted, err = s.activeOrdersReader.GetFormattedActiveOrders(ctx, f.TenantID)
+		redisFetchMS = time.Since(started).Milliseconds()
 		if err != nil {
+			logging.Error(ctx, "getAll redis fetch failed", err, "duration_ms", redisFetchMS)
 			return GetAllOrdersResult{}, err
 		}
-		log.Printf("getAll: redis fetch done count=%d", len(redisFormatted))
-	} else {
-		log.Printf("getAll: redis fetch skipped searchStatus=%q", f.SearchStatus)
 	}
 
+	started = time.Now()
 	allOrders := mergeGetAllOrders(mysqlFormatted, redisFormatted, f)
-	log.Printf("getAll: merged filtered count=%d", len(allOrders))
+	mergeFilterMS = time.Since(started).Milliseconds()
 
+	started = time.Now()
 	sortFormattedOrders(allOrders, f.SortField, f.SortOrder)
-	log.Printf("getAll: sort done field=%q dir=%q", f.SortField, f.SortOrder)
+	sortMS = time.Since(started).Milliseconds()
 
+	started = time.Now()
 	totalCount := int64(len(allOrders))
 	pagedOrders := paginateFormattedOrders(allOrders, f.Page, f.PageSize)
-	log.Printf("getAll: pagination done total=%d pageCount=%d", totalCount, len(pagedOrders))
+	paginationMS = time.Since(started).Milliseconds()
 
 	orderIDs := make([]int64, 0, len(pagedOrders))
 	for _, value := range pagedOrders {
 		orderIDs = append(orderIDs, value.OrderID)
 	}
 
-	log.Printf("getAll: options fetch start count=%d", len(orderIDs))
+	started = time.Now()
 	optionsMap, err := s.optionsReader.GetOptionsForOrders(ctx, orderIDs)
+	optionsFetchMS = time.Since(started).Milliseconds()
 	if err != nil {
+		logging.Error(ctx, "getAll options fetch failed", err, "duration_ms", optionsFetchMS)
 		return GetAllOrdersResult{}, err
 	}
-	log.Printf("getAll: options fetch done count=%d", len(optionsMap))
 
+	started = time.Now()
 	for i := range pagedOrders {
 		pagedOrders[i].Options = optionsMap[pagedOrders[i].OrderID]
 	}
+	optionsAssignMS = time.Since(started).Milliseconds()
 
+	started = time.Now()
 	prepared, err := s.PrepareOrdersData(ctx, pagedOrders, WarningFilter{
 		BaseFilter: BaseFilter{
 			Language: f.Language,
 			Group:    normalizeGetAllGroup(f.SearchStatus),
 		},
 	})
+	prepareMS = time.Since(started).Milliseconds()
 	if err != nil {
+		logging.Error(ctx, "getAll prepare orders failed", err, "duration_ms", prepareMS)
 		return GetAllOrdersResult{}, err
 	}
-	log.Printf("getAll: prepare orders done count=%d", len(prepared))
+
+	logging.Info(ctx, "getAll timings",
+		"total_ms", time.Since(totalStarted).Milliseconds(),
+		"mysql_fetch_ms", mysqlFetchMS,
+		"address_resolve_ms", addressResolveMS,
+		"mysql_map_ms", mysqlMapMS,
+		"redis_fetch_ms", redisFetchMS,
+		"merge_filter_ms", mergeFilterMS,
+		"sort_ms", sortMS,
+		"pagination_ms", paginationMS,
+		"options_fetch_ms", optionsFetchMS,
+		"options_assign_ms", optionsAssignMS,
+		"prepare_ms", prepareMS,
+		"tenant_id", f.TenantID,
+		"search_status", f.SearchStatus,
+		"page", f.Page,
+		"page_size", f.PageSize,
+		"sort_field", f.SortField,
+		"sort_order", f.SortOrder,
+		"mysql_orders_count", len(mysqlOrders),
+		"mysql_formatted_count", len(mysqlFormatted),
+		"redis_formatted_count", len(redisFormatted),
+		"merged_count", len(allOrders),
+		"paged_count", len(pagedOrders),
+		"options_orders_count", len(optionsMap),
+		"prepared_count", len(prepared),
+		"mysql_enabled", shouldFetchMySQLForGetAll(f.SearchStatus),
+		"redis_enabled", shouldFetchRedisForGetAll(f.SearchStatus),
+	)
 
 	return GetAllOrdersResult{
 		OrderTotalCount: totalCount,

@@ -2,8 +2,8 @@ package mysql
 
 import (
 	"context"
-	"log"
 	"orders-service/internal/app/order"
+	"orders-service/internal/logging"
 	"strings"
 	"time"
 )
@@ -160,14 +160,17 @@ WHERE o.tenant_id = ?
 		args = append(args, from, to, from, to, from, to)
 	}
 
-	start := time.Now()
+	totalStarted := time.Now()
+	queryStarted := time.Now()
 	rows, err := r.db.QueryContext(ctx, sb.String(), args...)
-	log.Println("GET ALL MYSQL REQUEST TIME:", time.Since(start))
+	queryMS := time.Since(queryStarted).Milliseconds()
 	if err != nil {
+		logging.Error(ctx, "mysql getAll query failed", err, "query_ms", queryMS)
 		return nil, err
 	}
 	defer rows.Close()
 
+	scanStarted := time.Now()
 	var result []order.FullOrder
 	for rows.Next() {
 		var o order.FullOrder
@@ -272,8 +275,31 @@ WHERE o.tenant_id = ?
 		}
 		result = append(result, o)
 	}
+	scanMS := time.Since(scanStarted).Milliseconds()
+	totalMS := time.Since(totalStarted).Milliseconds()
 
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		logging.Error(ctx, "mysql getAll rows failed", err,
+			"query_ms", queryMS,
+			"scan_ms", scanMS,
+			"total_ms", totalMS,
+			"row_count", len(result),
+		)
+		return nil, err
+	}
+
+	logging.Info(ctx, "mysql getAll timings",
+		"query_ms", queryMS,
+		"scan_ms", scanMS,
+		"total_ms", totalMS,
+		"row_count", len(result),
+		"tenant_id", f.TenantID,
+		"city_count", len(f.CityIDs),
+		"shop_count", len(f.ShopIDs),
+		"date_filter", f.Date != nil && *f.Date != "",
+	)
+
+	return result, nil
 }
 
 func getAllDayRange(value *string) (int64, int64, bool) {
